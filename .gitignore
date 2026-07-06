@@ -1,0 +1,8 @@
+node_modules/
+.env
+reviews.json
+data/knowledge.txt
+data/campaigns.csv
+data/protocol.txt
+data/telegram_updates.txt
+data/telegram_exports/

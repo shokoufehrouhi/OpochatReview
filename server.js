@@ -1,0 +1,549 @@
+import "dotenv/config";
+import express from "express";
+import fetch from "node-fetch";
+import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const PORT = process.env.PORT || 3000;
+const REVIEWS_FILE = path.join(__dirname, "reviews.json");
+const LC_API = "https://api.livechatinc.com/v3.6/agent/action";
+const LC_CONFIG_API = "https://api.livechatinc.com/v3.6/configuration/action";
+
+const DATA_DIR = path.join(__dirname, "data");
+const GDOC_KNOWLEDGE_URL = "https://docs.google.com/document/d/14iBZtfOXkPTb_ZYM4zSIAZOqdZ_VZeoKW0zJiNHXSIs/export?format=txt";
+const GSHEET_CAMPAIGNS_URL = "https://docs.google.com/spreadsheets/d/1wp0FGyJe2LnMr2BMR42EiIQPrALrZcbNrN5qCg2q5X4/export?format=csv";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+const PROTOCOL_DOC_IDS = (process.env.PROTOCOL_DOC_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+
+let kb = { knowledge: "", campaigns: "", telegram: "", protocol: "", lastFetched: null };
+let telegramOffset = 0;
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function lcAuth() {
+  const raw = `${process.env.LIVECHAT_ACCOUNT_ID}:${process.env.LIVECHAT_PAT}`;
+  return "Basic " + Buffer.from(raw).toString("base64");
+}
+
+async function lcPost(action, body, baseUrl = LC_API) {
+  const res = await fetch(`${baseUrl}/${action}`, {
+    method: "POST",
+    headers: {
+      Authorization: lcAuth(),
+      "Content-Type": "application/json",
+      "X-Region": "us-south1",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`LiveChat ${action} failed: ${res.status} ${err}`);
+  }
+  return res.json();
+}
+
+async function loadReviews() {
+  try {
+    const raw = await fs.readFile(REVIEWS_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+async function saveReviews(reviews) {
+  await fs.writeFile(REVIEWS_FILE, JSON.stringify(reviews, null, 2));
+}
+
+async function loadKnowledge() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const headers = { "User-Agent": "Mozilla/5.0" };
+
+  // Fetch Google Docs knowledge base
+  try {
+    const res = await fetch(GDOC_KNOWLEDGE_URL, { headers });
+    if (res.ok) {
+      kb.knowledge = await res.text();
+      await fs.writeFile(path.join(DATA_DIR, "knowledge.txt"), kb.knowledge);
+      console.log("[kb] knowledge base fetched from Google Docs");
+    } else {
+      kb.knowledge = await fs.readFile(path.join(DATA_DIR, "knowledge.txt"), "utf8").catch(() => "");
+      console.log("[kb] Google Docs failed, using cached knowledge.txt");
+    }
+  } catch {
+    kb.knowledge = await fs.readFile(path.join(DATA_DIR, "knowledge.txt"), "utf8").catch(() => "");
+  }
+
+  // Fetch Google Sheets campaigns
+  try {
+    const res = await fetch(GSHEET_CAMPAIGNS_URL, { headers });
+    if (res.ok) {
+      kb.campaigns = await res.text();
+      await fs.writeFile(path.join(DATA_DIR, "campaigns.csv"), kb.campaigns);
+      console.log("[kb] campaigns fetched from Google Sheets");
+    } else {
+      kb.campaigns = await fs.readFile(path.join(DATA_DIR, "campaigns.csv"), "utf8").catch(() => "");
+      console.log("[kb] Google Sheets failed, using cached campaigns.csv");
+    }
+  } catch {
+    kb.campaigns = await fs.readFile(path.join(DATA_DIR, "campaigns.csv"), "utf8").catch(() => "");
+  }
+
+  // Import historical Telegram exports (JSON files from Telegram Desktop)
+  await importTelegramExport();
+  // Load Telegram updates from file (auto-updated by pollTelegram)
+  kb.telegram = await fs.readFile(path.join(DATA_DIR, "telegram_updates.txt"), "utf8").catch(() => "");
+
+  // Fetch protocol docs from Google Drive (by doc ID)
+  await fetchProtocolDocs();
+
+  kb.lastFetched = new Date().toISOString();
+  console.log(`[kb] loaded — knowledge:${kb.knowledge.length}c campaigns:${kb.campaigns.length}c telegram:${kb.telegram.length}c protocol:${kb.protocol.length}c`);
+}
+
+async function fetchProtocolDocs() {
+  if (!PROTOCOL_DOC_IDS.length) {
+    kb.protocol = await fs.readFile(path.join(DATA_DIR, "protocol.txt"), "utf8").catch(() => "");
+    return;
+  }
+  const parts = [];
+  for (const docId of PROTOCOL_DOC_IDS) {
+    try {
+      const url = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+      if (res.ok) {
+        parts.push(await res.text());
+        console.log(`[protocol] fetched doc ${docId}`);
+      } else {
+        console.log(`[protocol] failed ${docId}: ${res.status}`);
+      }
+    } catch (e) {
+      console.log(`[protocol] error ${docId}:`, e.message);
+    }
+  }
+  if (parts.length) {
+    kb.protocol = parts.join("\n\n---\n\n");
+    await fs.writeFile(path.join(DATA_DIR, "protocol.txt"), kb.protocol);
+  } else {
+    kb.protocol = await fs.readFile(path.join(DATA_DIR, "protocol.txt"), "utf8").catch(() => "");
+  }
+}
+
+async function importTelegramExport() {
+  const exportDir = path.join(DATA_DIR, "telegram_exports");
+  await fs.mkdir(exportDir, { recursive: true });
+
+  let files;
+  try {
+    files = await fs.readdir(exportDir);
+  } catch { return; }
+
+  const jsonFiles = files.filter(f => f.endsWith(".json"));
+  if (!jsonFiles.length) return;
+
+  const existingLines = new Set(
+    (await fs.readFile(path.join(DATA_DIR, "telegram_updates.txt"), "utf8").catch(() => ""))
+      .split("\n").filter(Boolean)
+  );
+
+  const newLines = [];
+  for (const file of jsonFiles) {
+    try {
+      const raw = await fs.readFile(path.join(exportDir, file), "utf8");
+      const data = JSON.parse(raw);
+      const groupName = data.name || file.replace(".json", "");
+      const messages = data.messages || [];
+      for (const msg of messages) {
+        if (msg.type !== "message") continue;
+        const text = typeof msg.text === "string" ? msg.text
+          : Array.isArray(msg.text) ? msg.text.map(t => typeof t === "string" ? t : t.text || "").join("") : "";
+        if (!text.trim()) continue;
+        const date = (msg.date || "").slice(0, 16).replace("T", " ");
+        const from = msg.from || "unknown";
+        const line = `[${date}] ${groupName} — ${from}: ${text}`;
+        if (!existingLines.has(line)) {
+          newLines.push(line);
+          existingLines.add(line);
+        }
+      }
+      console.log(`[telegram-import] processed ${file}: ${messages.length} messages`);
+    } catch (e) {
+      console.log(`[telegram-import] error in ${file}:`, e.message);
+    }
+  }
+
+  if (newLines.length) {
+    newLines.sort();
+    await fs.appendFile(path.join(DATA_DIR, "telegram_updates.txt"), newLines.join("\n") + "\n");
+    console.log(`[telegram-import] added ${newLines.length} new messages`);
+  }
+}
+
+async function pollTelegram() {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  try {
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${telegramOffset}&limit=100&timeout=0`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ok || !data.result.length) return;
+
+    const newLines = [];
+    for (const update of data.result) {
+      telegramOffset = update.update_id + 1;
+      const msg = update.message || update.channel_post;
+      if (!msg || !msg.text) continue;
+      const chatId = String(msg.chat.id);
+      if (TELEGRAM_CHAT_IDS.length && !TELEGRAM_CHAT_IDS.includes(chatId)) continue;
+      const date = new Date(msg.date * 1000).toISOString().replace("T", " ").slice(0, 16);
+      const group = msg.chat.title || msg.chat.username || chatId;
+      newLines.push(`[${date}] ${group}: ${msg.text}`);
+    }
+
+    if (newLines.length) {
+      await fs.appendFile(path.join(DATA_DIR, "telegram_updates.txt"), newLines.join("\n") + "\n");
+      kb.telegram = await fs.readFile(path.join(DATA_DIR, "telegram_updates.txt"), "utf8").catch(() => "");
+      console.log(`[telegram] saved ${newLines.length} new messages`);
+    }
+  } catch (e) {
+    console.log("[telegram] poll error:", e.message);
+  }
+}
+
+function buildTranscript(events, users) {
+  return events
+    .filter((e) => e.type === "message" && e.text)
+    .map((e) => {
+      const user = users.find((u) => u.id === e.author_id);
+      const role = user?.type || "unknown";
+      const name = user?.name || e.author_id;
+      return `[${e.created_at || ""}] ${name} (${role}): ${e.text}`;
+    })
+    .join("\n");
+}
+
+async function reviewWithClaude(transcript, chatId, chatStartedAt) {
+  const knowledgeSection = kb.knowledge
+    ? `\nKNOWLEDGE BASE (use this to verify agent's answers):\n${kb.knowledge.slice(0, 8000)}\n`
+    : "";
+  const campaignsSection = kb.campaigns
+    ? `\nACTIVE CAMPAIGNS:\n${kb.campaigns.slice(0, 3000)}\n`
+    : "";
+  const telegramSection = kb.telegram
+    ? `\nTELEGRAM UPDATES (each entry has a timestamp — only hold agent accountable for updates posted BEFORE the chat date):\n${kb.telegram.slice(0, 3000)}\n`
+    : "";
+  const protocolSection = kb.protocol
+    ? `\nRESPONSE PROTOCOL:\n${kb.protocol.slice(0, 3000)}\n`
+    : "";
+
+  const prompt = `You are a quality reviewer for a forex/CFD broker's customer support team.
+CHAT DATE: ${chatStartedAt || "unknown"}
+${knowledgeSection}${campaignsSection}${telegramSection}${protocolSection}
+Analyze this chat transcript and score the agent on 8 criteria.
+Chats may be in Persian (Farsi), English, or Arabic. Write all notes in the SAME language as the chat.
+
+Scoring criteria:
+1. response_time_score: Use timestamps in transcript to calculate exact times.
+   SLA rules:
+   - First response time: under 15s = 10, 15-30s = 8, 30-60s = 6, over 60s = 4 or lower.
+   - Between each agent reply: under 45s = good, 45-90s = warning, over 90s = bad.
+   Score based on worst violations. Mention exact times in notes.
+2. tone_score: Polite, professional, calm even if customer is angry. No inappropriate language. Emotion control.
+3. accuracy_score: Compare agent's answers against the KNOWLEDGE BASE and ACTIVE CAMPAIGNS above. Check for wrong info about price, spread, withdrawal, deposit, fees, account types. If no knowledge base is provided, score based on general forex industry knowledge. For Telegram updates, only penalize if the update was posted BEFORE the chat date.
+4. resolution_score: Was problem fully resolved? How many messages needed (fewer = better)? Was escalation done when needed?
+5. compliance_score: No guaranteed profit promises. Risk warnings given when needed. Followed official broker policy/script. No regulatory violations.
+6. product_knowledge_score: Correct knowledge of platform (MT4/MT5), leverage, margin, account types, fees. Correct technical explanations.
+7. satisfaction_score: Infer customer satisfaction from their tone and final messages. Did customer seem happy/resolved?
+8. language_score: Spelling and grammar quality. Consistent brand voice. Professional writing.
+
+overall_score: weighted average (accuracy 20%, resolution 20%, compliance 15%, tone 15%, response_time 15%, product_knowledge 10%, satisfaction 3%, language 2%)
+
+Return ONLY a valid JSON object, no extra text:
+{
+  "overall_score": <1-10>,
+  "response_time_score": <1-10>,
+  "response_time_notes": "<estimated first response time and SLA assessment>",
+  "tone_score": <1-10>,
+  "tone_notes": "<professionalism and emotion control assessment>",
+  "accuracy_score": <1-10>,
+  "accuracy_notes": "<assessment of information accuracy>",
+  "resolution_score": <1-10>,
+  "resolution_notes": "<was issue resolved, message count, escalation if any>",
+  "compliance_score": <1-10>,
+  "compliance_notes": "<risk warnings, no unrealistic promises, policy adherence>",
+  "product_knowledge_score": <1-10>,
+  "product_knowledge_notes": "<platform/product knowledge assessment>",
+  "satisfaction_score": <1-10>,
+  "satisfaction_notes": "<inferred customer satisfaction>",
+  "language_score": <1-10>,
+  "language_notes": "<grammar, spelling and brand voice notes>",
+  "resolved": <true or false>,
+  "escalated": <true or false>,
+  "language_detected": <"fa" or "en" or "ar" or "mixed">,
+  "issues": "<bullet list of problems found, or null if none>",
+  "strengths": "<bullet list of strong points>",
+  "summary": "<2-3 sentence overall summary in same language as chat>"
+}
+
+TRANSCRIPT:
+${transcript}`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5",
+      max_tokens: 2048,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.log(`[claude] error body:`, errBody);
+    throw new Error(`Claude API error: ${res.status} ${errBody}`);
+  }
+  const data = await res.json();
+  let text = data.content[0].text.trim();
+  if (text.startsWith("```")) {
+    text = text.replace(/```json?\n?/, "").replace(/```$/, "").trim();
+  }
+  return JSON.parse(text);
+}
+
+// ── Routes ───────────────────────────────────────────────────────────────────
+
+// Get all agents
+app.get("/api/agents", async (req, res) => {
+  try {
+    console.log("calling list_agents...");
+    const data = await lcPost("list_agents", {}, LC_CONFIG_API);
+    console.log("list_agents raw:", JSON.stringify(data).slice(0, 300));
+    let agentList = [];
+    if (Array.isArray(data)) agentList = data;
+    else if (Array.isArray(data?.agents)) agentList = data.agents;
+    else if (typeof data === "object") agentList = Object.values(data).find(v => Array.isArray(v)) || [];
+    res.json(agentList.map((a) => ({
+      id: a.id,
+      name: a.name,
+      email: a.email,
+      avatar: a.avatar?.url || null,
+    })));
+  } catch (e) {
+    console.log("list_agents error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Fetch archived chats from LiveChat
+app.get("/api/chats", async (req, res) => {
+  try {
+    const { date_from, date_to, agent_id, page_id } = req.query;
+    const filters = {};
+    if (date_from) filters.from = date_from;
+    if (date_to) filters.to = date_to;
+    if (agent_id) filters.agents = { values: [agent_id] };
+
+    const body = page_id ? { page_id } : { filters, limit: 25 };
+
+    const data = await lcPost("list_archives", body);
+    console.log('[chats] found_chats:', data.found_chats, '| total_chats:', data.total_chats, '| chats count:', (data.chats||[]).length);
+    const reviews = await loadReviews();
+
+    const chats = (data.chats || []).map((c) => {
+      const thread = (c.threads || c.thread ? [c.thread] : [])[0] || {};
+      const agentUser = (c.users || []).find((u) => u.type === "agent");
+      const customerUser = (c.users || []).find((u) => u.type === "customer");
+      return {
+        id: c.id,
+        agent: agentUser ? { id: agentUser.id, name: agentUser.name } : null,
+        customer_name: customerUser?.name || null,
+        started_at: thread.created_at || null,
+        ended_at: thread.ended_at || null,
+        review: reviews[c.id] || null,
+      };
+    });
+
+    res.json({ chats, next_page_id: data.next_page_id || null, total_chats: data.found_chats || data.total_chats || chats.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get single chat with full transcript
+app.get("/api/chats/:chatId", async (req, res) => {
+  try {
+    const data = await lcPost("get_chat", { chat_id: req.params.chatId });
+    const thread = data.thread || (data.threads || [])[0] || {};
+    const users = data.users || [];
+    const events = thread.events || [];
+    const reviews = await loadReviews();
+
+    const messages = events
+      .filter((e) => e.type === "message" && e.text)
+      .map((e) => {
+        const user = users.find((u) => u.id === e.author_id);
+        return {
+          author_type: user?.type || "unknown",
+          author_name: user?.name || e.author_id,
+          content: e.text,
+          created_at: e.created_at || null,
+        };
+      });
+
+    const agentUser = users.find((u) => u.type === "agent");
+    const customerUser = users.find((u) => u.type === "customer");
+
+    res.json({
+      id: data.id,
+      agent: agentUser ? { id: agentUser.id, name: agentUser.name, email: agentUser.email } : null,
+      customer_name: customerUser?.name || null,
+      started_at: thread.created_at || null,
+      ended_at: thread.ended_at || null,
+      messages,
+      review: reviews[data.id] || null,
+      _users: users,
+      _events: events,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Review a chat with Claude AI
+app.post("/api/review/:chatId", async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    console.log(`[review] fetching chat ${chatId}`);
+
+    const data = await lcPost("get_chat", { chat_id: chatId });
+    console.log(`[review] get_chat keys:`, Object.keys(data));
+
+    const thread = data.thread || (data.threads || [])[0] || {};
+    const users = data.users || [];
+    const events = thread.events || [];
+    console.log(`[review] thread keys:`, Object.keys(thread));
+    console.log(`[review] events: ${events.length}, users: ${users.length}`);
+
+    const transcript = buildTranscript(events, users);
+    console.log(`[review] transcript length: ${transcript.length}`);
+
+    if (!transcript) {
+      return res.status(400).json({ error: "No messages in this chat" });
+    }
+
+    const chatStartedAt = thread.created_at || null;
+    const review = await reviewWithClaude(transcript, chatId, chatStartedAt);
+    review.reviewed_at = new Date().toISOString();
+
+    const reviews = await loadReviews();
+    reviews[chatId] = review;
+    await saveReviews(reviews);
+
+    console.log(`[review] done for ${chatId}, score: ${review.overall_score}`);
+    res.json(review);
+  } catch (e) {
+    console.log(`[review] ERROR:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get all saved reviews
+app.get("/api/reviews", async (req, res) => {
+  const reviews = await loadReviews();
+  res.json(reviews);
+});
+
+// Stats per agent
+app.get("/api/stats", async (req, res) => {
+  const reviews = await loadReviews();
+  const { date_from, date_to, agent_id } = req.query;
+
+  // Aggregate reviews by agent from the reviews file + agent data
+  const entries = Object.entries(reviews);
+  const byAgent = {};
+
+  for (const [, r] of entries) {
+    const aId = r._agent_id;
+    if (!aId) continue;
+    if (agent_id && aId !== agent_id) continue;
+    if (!byAgent[aId]) {
+      byAgent[aId] = { name: r._agent_name || aId, scores: [], resolved: 0, total: 0 };
+    }
+    byAgent[aId].scores.push(r.overall_score || 0);
+    if (r.resolved) byAgent[aId].resolved++;
+    byAgent[aId].total++;
+  }
+
+  const result = Object.entries(byAgent).map(([id, d]) => ({
+    id,
+    name: d.name,
+    total_chats: d.total,
+    avg_score: d.scores.length ? +(d.scores.reduce((a, b) => a + b, 0) / d.scores.length).toFixed(2) : 0,
+    resolved_count: d.resolved,
+    resolution_rate: d.total ? +((d.resolved / d.total) * 100).toFixed(1) : 0,
+  }));
+
+  res.json(result);
+});
+
+// Discover Telegram group IDs (call after adding bot to groups)
+app.get("/api/telegram-setup", async (req, res) => {
+  if (!TELEGRAM_BOT_TOKEN) return res.json({ error: "TELEGRAM_BOT_TOKEN not set in .env" });
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?limit=100`);
+    const data = await r.json();
+    if (!data.ok) return res.json({ error: data.description });
+    const groups = {};
+    for (const upd of data.result) {
+      const msg = upd.message || upd.channel_post;
+      if (msg?.chat) groups[msg.chat.id] = { title: msg.chat.title || msg.chat.username, type: msg.chat.type };
+    }
+    res.json({ groups, tip: "Copy the chat IDs (negative numbers) into TELEGRAM_CHAT_IDS in .env" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Refresh knowledge base from Google Docs/Sheets
+app.post("/api/refresh-knowledge", async (req, res) => {
+  try {
+    await loadKnowledge();
+    res.json({ ok: true, lastFetched: kb.lastFetched, knowledge: kb.knowledge.length, campaigns: kb.campaigns.length, telegram: kb.telegram.length, protocol: kb.protocol.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Knowledge status
+app.get("/api/knowledge-status", (req, res) => {
+  res.json({ lastFetched: kb.lastFetched, knowledge: kb.knowledge.length, campaigns: kb.campaigns.length, telegram: kb.telegram.length, protocol: kb.protocol.length });
+});
+
+// Start
+await loadKnowledge();
+if (TELEGRAM_BOT_TOKEN) {
+  await pollTelegram();
+  setInterval(pollTelegram, 5 * 60 * 1000); // poll every 5 minutes
+  console.log("[telegram] polling started");
+} else {
+  console.log("[telegram] TELEGRAM_BOT_TOKEN not set — polling disabled");
+}
+
+// Auto-refresh knowledge base every 6 hours
+setInterval(loadKnowledge, 6 * 60 * 60 * 1000);
+console.log("[kb] auto-refresh every 6 hours");
+app.listen(PORT, () => {
+  console.log(`\n✓ Chat Review running at http://localhost:${PORT}\n`);
+});
