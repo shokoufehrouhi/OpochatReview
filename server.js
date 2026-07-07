@@ -598,6 +598,17 @@ app.get("/api/chats/:chatId", async (req, res) => {
     const events = thread.events || [];
     const reviews = await loadReviews();
 
+    // Build segment map: event created_at -> agent responsible at that moment
+    const agentSegments = buildAgentSegments(events, users);
+    const eventSegmentMap = {};
+    for (const [, seg] of Object.entries(agentSegments)) {
+      for (const ev of seg.events) {
+        if (!eventSegmentMap[ev.created_at]) {
+          eventSegmentMap[ev.created_at] = { id: seg.id, name: seg.name };
+        }
+      }
+    }
+
     const messages = events
       .filter((e) => e.text && (e.type === "message" || e.type === "annotation"))
       .map((e) => {
@@ -609,9 +620,11 @@ app.get("/api/chats/:chatId", async (req, res) => {
           content: e.text,
           created_at: e.created_at || null,
           is_private: isPrivate,
+          segment_agent: isPrivate ? null : (eventSegmentMap[e.created_at] || null),
         };
       });
 
+    const allAgents = allAgentsInThread(events, users);
     const assigneeId = thread?.assignee?.id;
     const activeAgentId = events.find(e => {
       const u = users.find(u2 => u2.id === e.author_id);
@@ -626,6 +639,7 @@ app.get("/api/chats/:chatId", async (req, res) => {
       id: data.id,
       thread_id: thread.id || null,
       agent: agentUser ? { id: agentUser.id, name: agentUser.name, email: agentUser.email } : null,
+      agents: allAgents,
       customer_name: customerUser?.name || null,
       started_at: thread.created_at || null,
       ended_at: thread.ended_at || null,

@@ -224,6 +224,22 @@ async function fetchAllPagesForStats(startPageId, from, to, agentId) {
   }
 }
 
+// ── Helpers for employee-filtered views ──────────────────────────────────────
+function getAgentForShift(shift) {
+  if (!shift) return null;
+  return agents.find(a => {
+    const k = a.name.toLowerCase().trim();
+    return k === shift.agentKey || k.split(" ")[0] === shift.agentKey;
+  }) || null;
+}
+
+function getPerAgentReview(review, agentName) {
+  if (!review?.per_agent_reviews || !agentName) return null;
+  return Object.values(review.per_agent_reviews).find(
+    pr => pr?.agent_name?.toLowerCase() === agentName.toLowerCase()
+  ) || null;
+}
+
 // ── Render Table ─────────────────────────────────────────────────────────────
 function renderTable() {
   const tbody = document.getElementById("chatTableBody");
@@ -233,27 +249,47 @@ function renderTable() {
     return;
   }
 
+  const filteredAgent = activeEmployeeShift ? getAgentForShift(activeEmployeeShift) : null;
+  const filteredAgentName = filteredAgent?.name || null;
+
   const sortedChats = [...displayChats].sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
   tbody.innerHTML = sortedChats.map(chat => {
     const r = chat.review;
     const date = chat.started_at
       ? new Date(chat.started_at).toLocaleString("en-GB", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
       : "—";
-    const scoreBadge = r ? scorePill(r.overall_score) : `<span class="text-gray-300 text-xs">—</span>`;
+
+    // When employee filter is active, show per-agent score; otherwise overall
+    let displayScore = null, displayResolved = r?.resolved;
+    if (activeEmployeeShift && filteredAgentName && r) {
+      const pr = getPerAgentReview(r, filteredAgentName);
+      displayScore = pr ? pr.overall_score : null;
+      displayResolved = r.resolved; // keep overall resolved status
+    } else {
+      displayScore = r?.overall_score ?? null;
+    }
+
+    const scoreBadge = displayScore != null ? scorePill(displayScore) : `<span class="text-gray-300 text-xs">—</span>`;
     const statusBadge = r
-      ? `<span class="text-xs px-2 py-0.5 rounded-full ${r.resolved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}">${r.resolved ? "✓" : "✗"}</span>`
+      ? `<span class="text-xs px-2 py-0.5 rounded-full ${displayResolved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}">${displayResolved ? "✓" : "✗"}</span>`
       : `<span class="text-gray-300 text-xs">—</span>`;
     const langBadge = r?.language_detected ? `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">${r.language_detected.toUpperCase()}</span>` : "—";
     const shiftBadge = shiftLabel(chat.started_at);
     const allAgents = chat.agents?.length > 0 ? chat.agents : (chat.agent ? [chat.agent] : []);
-    const agentNames = allAgents.map(a => a.name).join(", ") || "—";
-    const employeeNames = allAgents.length > 0
-      ? [...new Set(allAgents.map(a => {
-          const n = getEmployeeName(a.name, chat.started_at);
-          return n || a.name;
-        }))].join(", ")
-      : "—";
-    const employeeName = employeeNames ? `<span class="font-medium text-gray-800">${employeeNames}</span>` : `<span class="text-gray-300">—</span>`;
+
+    // When employee filter active: show only that agent; otherwise show all
+    let agentNames, employeeNameHtml;
+    if (activeEmployeeShift && filteredAgentName) {
+      const matchAgent = allAgents.find(a => a.name.toLowerCase() === filteredAgentName.toLowerCase());
+      agentNames = matchAgent ? matchAgent.name : (filteredAgentName + " (?)");
+      employeeNameHtml = `<span class="font-medium text-gray-800">${activeEmployeeShift.employee}</span>`;
+    } else {
+      agentNames = allAgents.map(a => a.name).join(", ") || "—";
+      const empNames = allAgents.length > 0
+        ? [...new Set(allAgents.map(a => getEmployeeName(a.name, chat.started_at) || a.name))].join(", ")
+        : "—";
+      employeeNameHtml = `<span class="font-medium text-gray-800">${empNames}</span>`;
+    }
 
     const actionBtn = r
       ? `<div class="flex items-center gap-1" onclick="event.stopPropagation()">
@@ -414,8 +450,57 @@ async function openModal(chatId, threadId) {
     const r = chat.review;
     const lang = { fa: "Persian", en: "English", ar: "Arabic", mixed: "Mixed" };
 
-    const reviewHtml = r ? `
-      <div>
+    // Determine if we're in employee-filtered mode
+    const modalFilteredAgent = activeEmployeeShift ? getAgentForShift(activeEmployeeShift) : null;
+    const modalFilteredAgentName = modalFilteredAgent?.name || null;
+    const modalPR = modalFilteredAgentName ? getPerAgentReview(r, modalFilteredAgentName) : null;
+
+    function renderPerAgentCard(pr) {
+      return `<div class="mb-4 border border-gray-200 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-sm font-bold text-gray-700">${escHtml(pr.agent_name || "Agent")}</p>
+          <span class="text-lg font-black ${scoreColor(pr.overall_score)}">${(pr.overall_score||0).toFixed(1)}</span>
+        </div>
+        ${scoreBar("Response Time", pr.response_time_score, pr.response_time_notes)}
+        ${scoreBar("Tone", pr.tone_score, pr.tone_notes)}
+        ${scoreBar("Accuracy", pr.accuracy_score, pr.accuracy_notes)}
+        ${scoreBar("Resolution", pr.resolution_score, pr.resolution_notes)}
+        ${scoreBar("Compliance", pr.compliance_score, pr.compliance_notes)}
+        ${scoreBar("Product Knowledge", pr.product_knowledge_score, pr.product_knowledge_notes)}
+        ${pr.notes ? `<p class="text-xs text-gray-600 mt-2 whitespace-pre-line">${escHtml(pr.notes)}</p>` : ""}
+        ${pr.issues ? `<div class="mt-2 bg-red-50 border border-red-100 rounded p-2"><p class="text-xs text-red-600 whitespace-pre-line">${escHtml(Array.isArray(pr.issues) ? pr.issues.join("\n") : pr.issues)}</p></div>` : ""}
+      </div>`;
+    }
+
+    let reviewHtml;
+    if (!r) {
+      reviewHtml = `<p class="text-gray-400 text-sm mb-4">No review yet</p>
+        <button onclick="reviewChatModal('${chatId}','${threadId||''}')" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">Review with AI</button>`;
+    } else if (modalFilteredAgentName && modalPR) {
+      // Employee-filtered mode: show only this agent's per-agent review
+      reviewHtml = `<div>
+        ${r.supervisor_warning ? `<div class="mb-4 bg-orange-50 border border-orange-300 rounded-lg px-4 py-3 flex gap-2">
+          <span class="text-orange-500 font-bold text-sm shrink-0">⚠ Supervisor Warning</span>
+          <span class="text-sm text-orange-700">${escHtml(r.supervisor_warning_text || "")}</span>
+        </div>` : ""}
+        <p class="text-xs text-gray-400 uppercase font-semibold mb-3">Review: ${escHtml(activeEmployeeShift.employee)} (${escHtml(modalFilteredAgentName)})</p>
+        ${renderPerAgentCard(modalPR)}
+        <div class="mt-3 pt-3 border-t border-gray-100">
+          <p class="text-xs text-gray-400">Overall chat score: <span class="font-semibold text-gray-600">${(r.overall_score||0).toFixed(1)}</span></p>
+        </div>
+      </div>`;
+    } else if (modalFilteredAgentName && !modalPR) {
+      // Employee filtered but no per-agent review yet
+      reviewHtml = `<div>
+        <p class="text-xs text-gray-400 mb-3">No per-agent review for ${escHtml(modalFilteredAgentName)} yet.</p>
+        <p class="text-xs text-gray-400">Re-review this chat to generate per-agent scores.</p>
+        <div class="mt-3 pt-3 border-t border-gray-100">
+          <p class="text-xs text-gray-400">Overall: <span class="font-semibold">${(r.overall_score||0).toFixed(1)}</span></p>
+        </div>
+      </div>`;
+    } else {
+      // All employees mode: full review
+      reviewHtml = `<div>
         ${r.supervisor_warning ? `<div class="mb-4 bg-orange-50 border border-orange-300 rounded-lg px-4 py-3 flex gap-2">
           <span class="text-orange-500 font-bold text-sm shrink-0">⚠ Supervisor Warning</span>
           <span class="text-sm text-orange-700">${escHtml(r.supervisor_warning_text || "")}</span>
@@ -467,31 +552,17 @@ async function openModal(chatId, threadId) {
         ${r.per_agent_reviews && Object.keys(r.per_agent_reviews).length > 0 ? `
         <div class="mt-5 border-t border-gray-200 pt-4">
           <p class="text-xs font-semibold text-gray-500 uppercase mb-3">Per-Agent Reviews</p>
-          ${Object.values(r.per_agent_reviews).filter(Boolean).map(pr => `
-            <div class="mb-4 border border-gray-200 rounded-xl p-4">
-              <div class="flex items-center justify-between mb-3">
-                <p class="text-sm font-bold text-gray-700">${escHtml(pr.agent_name || "Agent")}</p>
-                <span class="text-lg font-black ${scoreColor(pr.overall_score)}">${(pr.overall_score||0).toFixed(1)}</span>
-              </div>
-              ${scoreBar("Response Time", pr.response_time_score, pr.response_time_notes)}
-              ${scoreBar("Tone", pr.tone_score, pr.tone_notes)}
-              ${scoreBar("Accuracy", pr.accuracy_score, pr.accuracy_notes)}
-              ${scoreBar("Resolution", pr.resolution_score, pr.resolution_notes)}
-              ${scoreBar("Compliance", pr.compliance_score, pr.compliance_notes)}
-              ${scoreBar("Product Knowledge", pr.product_knowledge_score, pr.product_knowledge_notes)}
-              ${pr.issues ? `<p class="text-xs text-red-600 mt-2 whitespace-pre-line">${escHtml(pr.issues)}</p>` : ""}
-            </div>
-          `).join("")}
+          ${Object.values(r.per_agent_reviews).filter(Boolean).map(pr => renderPerAgentCard(pr)).join("")}
         </div>` : ""}
-      </div>
-    ` : `
-      <p class="text-gray-400 text-sm mb-4">No review yet</p>
-      <button onclick="reviewChatModal('${chatId}')" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">
-        Review with AI
-      </button>
-    `;
+      </div>`;
+    }
 
-    const messages = (chat.messages || []).map(m => m.is_private ? `
+    // Filter messages to agent's segment when employee filter is active
+    const visibleMessages = modalFilteredAgentName
+      ? (chat.messages || []).filter(m => m.is_private || !m.segment_agent || m.segment_agent.name === modalFilteredAgentName)
+      : (chat.messages || []);
+
+    const messages = visibleMessages.map(m => m.is_private ? `
       <div class="flex justify-center mb-3">
         <div class="max-w-[90%] rounded-lg px-3 py-2 text-xs bg-orange-50 border border-orange-200 text-orange-700 text-center">
           <span class="font-semibold">⚠ ${escHtml(m.author_name)} (Supervisor Note):</span> ${escHtml(m.content)}
@@ -509,12 +580,15 @@ async function openModal(chatId, threadId) {
       <div>
         <div class="flex items-start justify-between p-6 border-b">
           <div>
-            <p class="text-xs text-gray-400 mb-1">Chat ID: ${chat.id}</p>
+            <p class="text-xs text-gray-400 mb-1">Chat ID: ${chat.thread_id || chat.id}</p>
             <h2 class="text-xl font-bold text-gray-800">${chat.customer_name || "Unknown Customer"}</h2>
             <p class="text-sm text-gray-500 mt-1">
-              Agent: <span class="font-medium">${chat.agent?.name || "—"}</span>
+              ${modalFilteredAgentName
+                ? `Employee: <span class="font-medium text-blue-600">${escHtml(activeEmployeeShift.employee)}</span> · Agent: <span class="font-medium">${escHtml(modalFilteredAgentName)}</span>`
+                : `Agents: <span class="font-medium">${(chat.agents||[chat.agent]).filter(Boolean).map(a=>escHtml(a.name)).join(", ") || "—"}</span>`
+              }
               · ${lang[r?.language_detected] || "Unknown language"}
-              · ${chat.started_at ? new Date(chat.started_at).toLocaleString() : ""}
+              · ${chat.started_at ? new Date(chat.started_at).toLocaleString("en-GB", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : ""}
             </p>
           </div>
           <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
