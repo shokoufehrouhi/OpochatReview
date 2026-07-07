@@ -325,6 +325,9 @@ IMPORTANT RULES FOR ACCURACY SCORING:
 - Do NOT flag contradictions between different parts of the KB or between different macros — these are data issues, not agent errors.
 - Do NOT flag different specs for same-named accounts across different platforms — this is expected.
 
+SPECIAL RULE — ACCOUNT TYPES:
+- Whenever a customer asks about account types, account options, or account comparison, the agent MUST send BOTH: (1) the general account types macro (covering MT4/MT5/cTrader/OpoTrade) AND (2) the TradingView account types macro. If either one is missing, flag it as an issue in the resolution or accuracy notes.
+
 SLA: first response <15s=10, 15-30s=8, 30-60s=6, >60s=4. Between replies: <45s good, 45-90s warning, >90s bad.
 overall_score = weighted avg: accuracy 20%, resolution 20%, compliance 15%, tone 15%, response_time 15%, product_knowledge 10%, satisfaction 3%, language 2%
 
