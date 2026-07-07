@@ -701,8 +701,19 @@ function updateChart() {
         y: { min: 0, max: 10, grid: { color: "#f1f5f9" } },
         x: { grid: { display: false } },
       },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          anchor: "end",
+          align: "end",
+          offset: 2,
+          color: "#374151",
+          font: { weight: "bold", size: 12 },
+          formatter: (v) => v.toFixed(1),
+        },
+      },
     },
+    plugins: [ChartDataLabels],
   });
 }
 
