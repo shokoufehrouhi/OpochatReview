@@ -302,41 +302,28 @@ function extractSupervisorNotes(events, users) {
     });
 }
 
-// Split events into per-agent segments.
-// Also detects routing/assignment events to catch agents who were assigned but never responded.
 function buildAgentSegments(events, users) {
-  const segments = {}; // agentId -> { id, name, events[], responded }
-  let currentAgent = null;
+  const segments = {};
 
+  // Pre-populate all agents from users list so silent/transferred agents are included
+  for (const u of users) {
+    if (u.type === "agent") {
+      segments[u.id] = { id: u.id, name: u.name, events: [], responded: false };
+    }
+  }
+
+  let currentAgent = null;
   for (const e of events) {
     const isPrivate = e.visibility === "agents" || e.type === "annotation";
-
-    // Routing assignment event: agent was assigned even if they never replied
-    if ((e.type === "routing.assigned" || e.type === "chat_transferred") && e.agent_id) {
-      const user = users.find(u => u.id === e.agent_id);
-      if (user) {
-        currentAgent = { id: user.id, name: user.name };
-        if (!segments[currentAgent.id]) {
-          segments[currentAgent.id] = { id: currentAgent.id, name: currentAgent.name, events: [], responded: false };
-        }
-      }
-    }
-
     if (!e.text || isPrivate) continue;
 
     const user = users.find(u => u.id === e.author_id);
     if (user?.type === "agent") {
       currentAgent = { id: user.id, name: user.name };
-      if (!segments[currentAgent.id]) {
-        segments[currentAgent.id] = { id: currentAgent.id, name: currentAgent.name, events: [], responded: false };
-      }
-      segments[currentAgent.id].responded = true;
+      segments[user.id].responded = true;
     }
 
     if (currentAgent) {
-      if (!segments[currentAgent.id]) {
-        segments[currentAgent.id] = { id: currentAgent.id, name: currentAgent.name, events: [], responded: false };
-      }
       segments[currentAgent.id].events.push(e);
     }
   }
@@ -345,6 +332,11 @@ function buildAgentSegments(events, users) {
 
 function allAgentsInThread(events, users) {
   const seen = {};
+  // Include all agents from users list (covers assigned-but-silent agents like transfer recipients)
+  for (const u of users) {
+    if (u.type === "agent") seen[u.id] = { id: u.id, name: u.name };
+  }
+  // Also scan events as fallback in case users list is incomplete
   for (const e of events) {
     if (!e.text || e.visibility === "agents" || e.type === "annotation") continue;
     const user = users.find(u => u.id === e.author_id);
@@ -442,28 +434,21 @@ ${transcript}`;
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
-app.get("/api/debug-chat/:threadId", async (req, res) => {
+app.get("/api/debug-chat/:chatId", async (req, res) => {
   try {
-    const threadId = req.params.threadId;
-    // Search recent archives to find the container chat ID for this thread
-    const searchData = await lcPost("list_archives", { filters: {}, limit: 100 });
-    let foundChat = null, foundThread = null;
-    for (const c of (searchData.chats || [])) {
-      const threads = c.threads || (c.thread ? [c.thread] : []);
-      const t = threads.find(t => t.id === threadId);
-      if (t) { foundChat = c; foundThread = t; break; }
+    const { chatId } = req.params;
+    const { thread_id } = req.query;
+    const data = await lcPost("get_chat", { chat_id: chatId });
+    let thread = data.thread || (data.threads || [])[0] || {};
+    if (thread_id && Array.isArray(data.threads)) {
+      thread = data.threads.find(t => t.id === thread_id) || thread;
     }
-    if (!foundChat) return res.json({ error: "Thread not found in recent 100 chats", threadId });
-
-    const data = await lcPost("get_chat", { chat_id: foundChat.id });
-    let thread = foundThread;
-    if (Array.isArray(data.threads)) thread = data.threads.find(t => t.id === threadId) || data.threads[0] || thread;
-    else if (data.thread) thread = data.thread;
     const events = thread.events || [];
     res.json({
-      container_chat_id: foundChat.id,
+      container_chat_id: chatId,
       thread_id: thread.id,
       assignee: thread.assignee,
+      all_threads: (data.threads || [data.thread]).filter(Boolean).map(t => ({ id: t.id, created_at: t.created_at, assignee: t.assignee })),
       users: (data.users || []).map(u => ({ id: u.id, name: u.name, type: u.type })),
       event_types: [...new Set(events.map(e => e.type))],
       events_summary: events.map(e => ({
@@ -672,17 +657,24 @@ app.post("/api/review/:chatId", async (req, res) => {
     const agentPromises = agentCount > 1
       ? Object.fromEntries(
           Object.entries(agentSegments).map(([agentId, seg]) => {
-            const hasAgentMessages = seg.events.some(e => {
-              const u = users.find(u2 => u2.id === e.author_id);
-              return u?.type === "agent";
-            });
-            // If agent was assigned but never responded, send a special transcript
-            const segTranscript = hasAgentMessages
-              ? buildTranscript(seg.events, users)
-              : `[SYSTEM] ${seg.name} was assigned this chat but sent ZERO responses. Customer messages were waiting with no reply. Agent lost/abandoned the chat.`;
+            // Agent was assigned but never sent a message — instant 0, no Claude call needed
+            if (!seg.responded) {
+              const result = Promise.resolve({
+                agent_name: seg.name,
+                overall_score: 0,
+                response_time_score: 0,
+                accuracy_score: 0,
+                tone_score: 0,
+                resolution_score: 0,
+                notes: `${seg.name} hich javabi be customer naferestade va chat ro az dast dad.`,
+                issues: ["Chat az dast raft — agent hich pasokhi naferestade"],
+                suggested_tags: [],
+              });
+              return [agentId, result];
+            }
             return [
               agentId,
-              reviewWithClaude(segTranscript, chatId, chatStartedAt, supervisorNotes, seg.name)
+              reviewWithClaude(buildTranscript(seg.events, users), chatId, chatStartedAt, supervisorNotes, seg.name)
                 .then(r => ({ ...r, agent_name: seg.name }))
                 .catch(() => null)
             ];
