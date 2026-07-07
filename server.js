@@ -274,54 +274,16 @@ async function reviewWithClaude(transcript, chatId, chatStartedAt) {
     ? `\nRESPONSE PROTOCOL:\n${kb.protocol.slice(0, 1500)}\n`
     : "";
 
-  const prompt = `You are a quality reviewer for a forex/CFD broker's customer support team.
+  const prompt = `You are a QA reviewer for a forex broker support team. Be concise.
 CHAT DATE: ${chatStartedAt || "unknown"}
 ${knowledgeSection}${campaignsSection}${telegramSection}${protocolSection}
-Analyze this chat transcript and score the agent on 8 criteria.
-Chats may be in Persian (Farsi), English, or Arabic. Write all notes in the SAME language as the chat.
+Score the agent on 8 criteria. Write notes in SAME language as chat (FA/EN/AR). Keep each note to 1 sentence max.
 
-Scoring criteria:
-1. response_time_score: Use timestamps in transcript to calculate exact times.
-   SLA rules:
-   - First response time: under 15s = 10, 15-30s = 8, 30-60s = 6, over 60s = 4 or lower.
-   - Between each agent reply: under 45s = good, 45-90s = warning, over 90s = bad.
-   Score based on worst violations. Mention exact times in notes.
-2. tone_score: Polite, professional, calm even if customer is angry. No inappropriate language. Emotion control.
-3. accuracy_score: Compare agent's answers against the KNOWLEDGE BASE and ACTIVE CAMPAIGNS above. Check for wrong info about price, spread, withdrawal, deposit, fees, account types. If no knowledge base is provided, score based on general forex industry knowledge. For Telegram updates, only penalize if the update was posted BEFORE the chat date.
-4. resolution_score: Was problem fully resolved? How many messages needed (fewer = better)? Was escalation done when needed?
-5. compliance_score: No guaranteed profit promises. Risk warnings given when needed. Followed official broker policy/script. No regulatory violations.
-6. product_knowledge_score: Correct knowledge of platform (MT4/MT5), leverage, margin, account types, fees. Correct technical explanations.
-7. satisfaction_score: Infer customer satisfaction from their tone and final messages. Did customer seem happy/resolved?
-8. language_score: Spelling and grammar quality. Consistent brand voice. Professional writing.
+SLA: first response <15s=10, 15-30s=8, 30-60s=6, >60s=4. Between replies: <45s good, 45-90s warning, >90s bad.
+overall_score = weighted avg: accuracy 20%, resolution 20%, compliance 15%, tone 15%, response_time 15%, product_knowledge 10%, satisfaction 3%, language 2%
 
-overall_score: weighted average (accuracy 20%, resolution 20%, compliance 15%, tone 15%, response_time 15%, product_knowledge 10%, satisfaction 3%, language 2%)
-
-Return ONLY a valid JSON object, no extra text:
-{
-  "overall_score": <1-10>,
-  "response_time_score": <1-10>,
-  "response_time_notes": "<estimated first response time and SLA assessment>",
-  "tone_score": <1-10>,
-  "tone_notes": "<professionalism and emotion control assessment>",
-  "accuracy_score": <1-10>,
-  "accuracy_notes": "<assessment of information accuracy>",
-  "resolution_score": <1-10>,
-  "resolution_notes": "<was issue resolved, message count, escalation if any>",
-  "compliance_score": <1-10>,
-  "compliance_notes": "<risk warnings, no unrealistic promises, policy adherence>",
-  "product_knowledge_score": <1-10>,
-  "product_knowledge_notes": "<platform/product knowledge assessment>",
-  "satisfaction_score": <1-10>,
-  "satisfaction_notes": "<inferred customer satisfaction>",
-  "language_score": <1-10>,
-  "language_notes": "<grammar, spelling and brand voice notes>",
-  "resolved": <true or false>,
-  "escalated": <true or false>,
-  "language_detected": <"fa" or "en" or "ar" or "mixed">,
-  "issues": "<bullet list of problems found, or null if none>",
-  "strengths": "<bullet list of strong points>",
-  "summary": "<2-3 sentence overall summary in same language as chat>"
-}
+Return ONLY valid JSON:
+{"overall_score":<1-10>,"response_time_score":<1-10>,"response_time_notes":"<1 sentence>","tone_score":<1-10>,"tone_notes":"<1 sentence>","accuracy_score":<1-10>,"accuracy_notes":"<1 sentence>","resolution_score":<1-10>,"resolution_notes":"<1 sentence>","compliance_score":<1-10>,"compliance_notes":"<1 sentence>","product_knowledge_score":<1-10>,"product_knowledge_notes":"<1 sentence>","satisfaction_score":<1-10>,"satisfaction_notes":"<1 sentence>","language_score":<1-10>,"language_notes":"<1 sentence>","resolved":<true/false>,"escalated":<true/false>,"language_detected":"<fa/en/ar/mixed>","issues":"<max 3 bullet points or null>","strengths":"<max 2 bullet points>","summary":"<1 sentence>"}
 
 TRANSCRIPT:
 ${transcript}`;
@@ -335,7 +297,7 @@ ${transcript}`;
     },
     body: JSON.stringify({
       model: "claude-haiku-4-5",
-      max_tokens: 1200,
+      max_tokens: 800,
       messages: [{ role: "user", content: prompt }],
     }),
   });
