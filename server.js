@@ -29,11 +29,12 @@ const DATA_DIR = path.join(__dirname, "data");
 const GDOC_KNOWLEDGE_URL = "https://docs.google.com/document/d/14iBZtfOXkPTb_ZYM4zSIAZOqdZ_VZeoKW0zJiNHXSIs/export?format=txt";
 const GSHEET_CAMPAIGNS_URL = "https://docs.google.com/spreadsheets/d/1wp0FGyJe2LnMr2BMR42EiIQPrALrZcbNrN5qCg2q5X4/export?format=csv";
 const GSHEET_MACROS_URL = "https://docs.google.com/spreadsheets/d/1CSAi2ltdxaidKTrLipZxKhW3zdbf5QERgcyqmu_k-sI/export?format=csv";
+const GSHEET_TAGS_URL = "https://docs.google.com/spreadsheets/d/16zX__NdZBhRvx9Nq4mcR71reR8P5fplygcz75yGfOi4/export?format=csv";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_IDS = (process.env.TELEGRAM_CHAT_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
 const PROTOCOL_DOC_IDS = (process.env.PROTOCOL_DOC_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
 
-let kb = { knowledge: "", campaigns: "", telegram: "", protocol: "", macros: "", lastFetched: null };
+let kb = { knowledge: "", campaigns: "", telegram: "", protocol: "", macros: "", tags: "", lastFetched: null };
 let telegramOffset = 0;
 
 app.use(express.json());
@@ -143,6 +144,20 @@ async function loadKnowledge() {
     kb.macros = await fs.readFile(path.join(DATA_DIR, "macros.csv"), "utf8").catch(() => "");
   }
 
+  // Fetch tags sheet
+  try {
+    const res = await fetch(GSHEET_TAGS_URL, { headers });
+    if (res.ok) {
+      kb.tags = await res.text();
+      await fs.writeFile(path.join(DATA_DIR, "tags.csv"), kb.tags);
+      console.log("[kb] tags fetched from Google Sheets");
+    } else {
+      kb.tags = await fs.readFile(path.join(DATA_DIR, "tags.csv"), "utf8").catch(() => "");
+    }
+  } catch {
+    kb.tags = await fs.readFile(path.join(DATA_DIR, "tags.csv"), "utf8").catch(() => "");
+  }
+
   // Import historical Telegram exports (JSON files from Telegram Desktop)
   await importTelegramExport();
   // Load Telegram updates from file (auto-updated by pollTelegram)
@@ -152,7 +167,7 @@ async function loadKnowledge() {
   await fetchProtocolDocs();
 
   kb.lastFetched = new Date().toISOString();
-  console.log(`[kb] loaded — knowledge:${kb.knowledge.length}c campaigns:${kb.campaigns.length}c telegram:${kb.telegram.length}c protocol:${kb.protocol.length}c macros:${kb.macros.length}c`);
+  console.log(`[kb] loaded — knowledge:${kb.knowledge.length}c campaigns:${kb.campaigns.length}c telegram:${kb.telegram.length}c protocol:${kb.protocol.length}c macros:${kb.macros.length}c tags:${kb.tags.length}c`);
 }
 
 async function fetchProtocolDocs() {
@@ -292,17 +307,20 @@ async function reviewWithClaude(transcript, chatId, chatStartedAt) {
   const macrosSection = kb.macros
     ? `\nSTANDARD MACROS (pre-approved responses — check if agent used correct macro or deviated unnecessarily):\n${kb.macros.slice(0, 2000)}\n`
     : "";
+  const tagsSection = kb.tags
+    ? `\nAVAILABLE TAGS (assign ALL that apply — minimum 1 per chat. If referral was mentioned, always include "referred"):\n${kb.tags.slice(0, 2000)}\n`
+    : "";
 
   const prompt = `You are a QA reviewer for a forex broker support team. Be concise.
 CHAT DATE: ${chatStartedAt || "unknown"}
-${knowledgeSection}${campaignsSection}${telegramSection}${protocolSection}${macrosSection}
+${knowledgeSection}${campaignsSection}${telegramSection}${protocolSection}${macrosSection}${tagsSection}
 Score the agent on 8 criteria. Write notes in SAME language as chat (FA/EN/AR). Keep each note to 1 sentence max.
 
 SLA: first response <15s=10, 15-30s=8, 30-60s=6, >60s=4. Between replies: <45s good, 45-90s warning, >90s bad.
 overall_score = weighted avg: accuracy 20%, resolution 20%, compliance 15%, tone 15%, response_time 15%, product_knowledge 10%, satisfaction 3%, language 2%
 
 Return ONLY valid JSON:
-{"overall_score":<1-10>,"response_time_score":<1-10>,"response_time_notes":"<1 sentence>","tone_score":<1-10>,"tone_notes":"<1 sentence>","accuracy_score":<1-10>,"accuracy_notes":"<1 sentence>","resolution_score":<1-10>,"resolution_notes":"<1 sentence>","compliance_score":<1-10>,"compliance_notes":"<1 sentence>","product_knowledge_score":<1-10>,"product_knowledge_notes":"<1 sentence>","satisfaction_score":<1-10>,"satisfaction_notes":"<1 sentence>","language_score":<1-10>,"language_notes":"<1 sentence>","resolved":<true/false>,"escalated":<true/false>,"language_detected":"<fa/en/ar/mixed>","issues":"<max 3 bullet points or null>","strengths":"<max 2 bullet points>","summary":"<1 sentence>"}
+{"overall_score":<1-10>,"response_time_score":<1-10>,"response_time_notes":"<1 sentence>","tone_score":<1-10>,"tone_notes":"<1 sentence>","accuracy_score":<1-10>,"accuracy_notes":"<1 sentence>","resolution_score":<1-10>,"resolution_notes":"<1 sentence>","compliance_score":<1-10>,"compliance_notes":"<1 sentence>","product_knowledge_score":<1-10>,"product_knowledge_notes":"<1 sentence>","satisfaction_score":<1-10>,"satisfaction_notes":"<1 sentence>","language_score":<1-10>,"language_notes":"<1 sentence>","resolved":<true/false>,"escalated":<true/false>,"language_detected":"<fa/en/ar/mixed>","suggested_tags":["<tag1>","<tag2>"],"issues":"<max 3 bullet points or null>","strengths":"<max 2 bullet points>","summary":"<1 sentence>"}
 
 TRANSCRIPT:
 ${transcript}`;
@@ -618,7 +636,7 @@ app.get("/api/telegram-setup", async (req, res) => {
 app.post("/api/refresh-knowledge", async (req, res) => {
   try {
     await loadKnowledge();
-    res.json({ ok: true, lastFetched: kb.lastFetched, knowledge: kb.knowledge.length, campaigns: kb.campaigns.length, telegram: kb.telegram.length, protocol: kb.protocol.length, macros: kb.macros.length });
+    res.json({ ok: true, lastFetched: kb.lastFetched, knowledge: kb.knowledge.length, campaigns: kb.campaigns.length, telegram: kb.telegram.length, protocol: kb.protocol.length, macros: kb.macros.length, tags: kb.tags.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -626,7 +644,7 @@ app.post("/api/refresh-knowledge", async (req, res) => {
 
 // Knowledge status
 app.get("/api/knowledge-status", (req, res) => {
-  res.json({ lastFetched: kb.lastFetched, knowledge: kb.knowledge.length, campaigns: kb.campaigns.length, telegram: kb.telegram.length, protocol: kb.protocol.length, macros: kb.macros.length });
+  res.json({ lastFetched: kb.lastFetched, knowledge: kb.knowledge.length, campaigns: kb.campaigns.length, telegram: kb.telegram.length, protocol: kb.protocol.length, macros: kb.macros.length, tags: kb.tags.length });
 });
 
 // Start
