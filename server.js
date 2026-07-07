@@ -466,11 +466,15 @@ SPECIAL RULE — ACCOUNT TYPES:
 - Whenever a customer asks about account types, account options, or account comparison, the agent MUST send BOTH: (1) the general account types macro (covering MT4/MT5/cTrader/OpoTrade) AND (2) the TradingView account types macro. If either one is missing, flag it as an issue in the resolution or accuracy notes.
 
 DEPARTMENT ROUTING RULE:
-- This broker has separate departments: General, Social Trade (CopyTrade), cTrader, etc. Customers self-select their department when starting a chat — the agent has NO control over which department the customer chose.
-- The Social Trade department ONLY handles questions about the Social Trade / CopyTrade platform. Any other topic (account types, deposits, general questions, etc.) must be transferred to the General department.
-- CORRECT transfer procedure: agent must first INFORM the customer they are being transferred (e.g. "I will transfer you to the General department"), THEN perform the transfer. If the agent did both steps → score positively, no penalty for the transfer or lack of resolution.
-- INCORRECT (penalize): agent transferred WITHOUT notifying the customer first, OR agent kept a chat they should have transferred.
-- Do NOT penalize the agent for the customer choosing the wrong department.
+- This broker has separate departments: General, Social Trade (CopyTrade), cTrader, KYC, etc. Customers self-select their department when starting a chat — the agent has NO control over which department the customer chose.
+- Each department handles ONLY its own topics:
+  • Social Trade: questions about Social Trade / CopyTrade platform ONLY.
+  • General: account issues, deposits, withdrawals, platform problems, buy/sell errors, etc.
+  • KYC: identity verification, document submission, account activation.
+- If a customer's question is OUTSIDE the agent's department scope, the agent MUST transfer to the correct department.
+- CORRECT transfer procedure: agent first INFORMS the customer ("I will transfer you to General"), THEN transfers. If done → "resolved": true for this agent's portion, score resolution and compliance HIGH. The unresolved customer issue belongs to the NEXT department — do NOT count it as this agent's failure.
+- CRITICAL: Do NOT flag "unresolved issue" or "customer problem unaddressed" against an agent who correctly transferred a question that was outside their department scope. Their job was to route correctly, not solve the problem.
+- INCORRECT (penalize): agent transferred WITHOUT informing the customer first, OR agent kept a chat they should have transferred, OR agent tried to answer questions outside their scope.
 
 SUPERVISOR NOTES RULE:
 - Lines marked [SUPERVISOR NOTE] in the transcript are private internal messages from supervisors (not visible to customer).
