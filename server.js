@@ -302,6 +302,40 @@ function extractSupervisorNotes(events, users) {
     });
 }
 
+// Split events into per-agent segments: each message belongs to whoever was
+// the last agent to send a message before it (i.e. who was "handling" at that point)
+function buildAgentSegments(events, users) {
+  const segments = {}; // agentId -> { id, name, events[] }
+  let currentAgent = null;
+
+  for (const e of events) {
+    if (!e.text) continue;
+    const user = users.find(u => u.id === e.author_id);
+    if (user?.type === "agent" && !(e.visibility === "agents" || e.type === "annotation")) {
+      currentAgent = { id: user.id, name: user.name };
+    }
+    if (currentAgent) {
+      if (!segments[currentAgent.id]) {
+        segments[currentAgent.id] = { id: currentAgent.id, name: currentAgent.name, events: [] };
+      }
+      segments[currentAgent.id].events.push(e);
+    }
+  }
+  return segments;
+}
+
+function allAgentsInThread(events, users) {
+  const seen = {};
+  for (const e of events) {
+    if (!e.text || e.visibility === "agents" || e.type === "annotation") continue;
+    const user = users.find(u => u.id === e.author_id);
+    if (user?.type === "agent" && !seen[user.id]) {
+      seen[user.id] = { id: user.id, name: user.name };
+    }
+  }
+  return Object.values(seen);
+}
+
 async function reviewWithClaude(transcript, chatId, chatStartedAt, supervisorNotes = []) {
   const knowledgeSection = kb.knowledge
     ? `\nKNOWLEDGE BASE:\n${kb.knowledge.slice(0, 3000)}\n`
@@ -455,10 +489,12 @@ app.get("/api/chats", async (req, res) => {
         || (activeAgentId ? users.find(u => u.id === activeAgentId) : null)
         || null;
       const customerUser = users.find((u) => u.type === "customer");
+      const allAgents = allAgentsInThread(events, users);
       return {
         id: c.id,
         thread_id: thread.id || null,
         agent: agentUser ? { id: agentUser.id, name: agentUser.name } : null,
+        agents: allAgents,
         customer_name: customerUser?.name || null,
         started_at: thread.created_at || null,
         ended_at: thread.ended_at || null,
@@ -558,22 +594,49 @@ app.post("/api/review/:chatId", async (req, res) => {
 
     const transcript = buildTranscript(events, users);
     const supervisorNotes = extractSupervisorNotes(events, users);
-    console.log(`[review] transcript length: ${transcript.length}, supervisor notes: ${supervisorNotes.length}`);
+    const agentSegments = buildAgentSegments(events, users);
+    const agentCount = Object.keys(agentSegments).length;
+    console.log(`[review] transcript: ${transcript.length}c, agents: ${agentCount}, supervisor notes: ${supervisorNotes.length}`);
 
     if (!transcript) {
       return res.status(400).json({ error: "No messages in this chat" });
     }
 
     const chatStartedAt = thread.created_at || null;
-    const review = await reviewWithClaude(transcript, chatId, chatStartedAt, supervisorNotes);
+
+    // Overall review + per-agent reviews in parallel
+    const overallPromise = reviewWithClaude(transcript, chatId, chatStartedAt, supervisorNotes);
+    const agentPromises = agentCount > 1
+      ? Object.fromEntries(
+          Object.entries(agentSegments).map(([agentId, seg]) => [
+            agentId,
+            reviewWithClaude(
+              buildTranscript(seg.events, users),
+              chatId,
+              chatStartedAt,
+              supervisorNotes
+            ).then(r => ({ ...r, agent_name: seg.name })).catch(() => null)
+          ])
+        )
+      : {};
+
+    const review = await overallPromise;
     review.reviewed_at = new Date().toISOString();
+
+    if (agentCount > 1) {
+      const perAgent = {};
+      for (const [agentId, promise] of Object.entries(agentPromises)) {
+        perAgent[agentId] = await promise;
+      }
+      review.per_agent_reviews = perAgent;
+    }
 
     const reviews = await loadReviews();
     const reviewKey = thread_id || chatId;
     reviews[reviewKey] = review;
     await saveReviews(reviews);
 
-    console.log(`[review] done for ${reviewKey}, score: ${review.overall_score}`);
+    console.log(`[review] done for ${reviewKey}, overall: ${review.overall_score}, agents: ${agentCount}`);
     res.json(review);
   } catch (e) {
     console.log(`[review] ERROR:`, e.message);

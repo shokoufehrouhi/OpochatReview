@@ -245,7 +245,15 @@ function renderTable() {
       : `<span class="text-gray-300 text-xs">—</span>`;
     const langBadge = r?.language_detected ? `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">${r.language_detected.toUpperCase()}</span>` : "—";
     const shiftBadge = shiftLabel(chat.started_at);
-    const employeeName = getEmployee(chat.agent?.name, chat.started_at);
+    const allAgents = chat.agents?.length > 0 ? chat.agents : (chat.agent ? [chat.agent] : []);
+    const agentNames = allAgents.map(a => a.name).join(", ") || "—";
+    const employeeNames = allAgents.length > 0
+      ? [...new Set(allAgents.map(a => {
+          const n = getEmployeeName(a.name, chat.started_at);
+          return n || a.name;
+        }))].join(", ")
+      : "—";
+    const employeeName = employeeNames ? `<span class="font-medium text-gray-800">${employeeNames}</span>` : `<span class="text-gray-300">—</span>`;
 
     const actionBtn = r
       ? `<div class="flex items-center gap-1" onclick="event.stopPropagation()">
@@ -262,7 +270,7 @@ function renderTable() {
           <button onclick="event.stopPropagation();copyId('${chat.thread_id || chat.id}')" title="Copy ID" class="shrink-0 text-gray-300 hover:text-blue-500 px-1 text-sm leading-none">⎘</button>
         </div>
       </td>
-      <td class="px-4 py-3 font-medium text-gray-700">${chat.agent?.name || "—"}</td>
+      <td class="px-4 py-3 font-medium text-gray-700 text-xs">${agentNames}</td>
       <td class="px-4 py-3 text-gray-600">${chat.customer_name || "—"}</td>
       <td class="px-4 py-3 text-gray-500 text-xs">${date}</td>
       <td class="px-4 py-3">${shiftBadge}</td>
@@ -449,6 +457,25 @@ async function openModal(chatId, threadId) {
         ${r.strengths ? `<div class="mt-3 bg-green-50 border border-green-100 rounded-lg p-3">
           <p class="text-xs font-semibold text-green-600 mb-1">Strengths</p>
           <p class="text-sm text-green-700 whitespace-pre-line">${escHtml(r.strengths)}</p>
+        </div>` : ""}
+        ${r.per_agent_reviews && Object.keys(r.per_agent_reviews).length > 0 ? `
+        <div class="mt-5 border-t border-gray-200 pt-4">
+          <p class="text-xs font-semibold text-gray-500 uppercase mb-3">Per-Agent Reviews</p>
+          ${Object.values(r.per_agent_reviews).filter(Boolean).map(pr => `
+            <div class="mb-4 border border-gray-200 rounded-xl p-4">
+              <div class="flex items-center justify-between mb-3">
+                <p class="text-sm font-bold text-gray-700">${escHtml(pr.agent_name || "Agent")}</p>
+                <span class="text-lg font-black ${scoreColor(pr.overall_score)}">${(pr.overall_score||0).toFixed(1)}</span>
+              </div>
+              ${scoreBar("Response Time", pr.response_time_score, pr.response_time_notes)}
+              ${scoreBar("Tone", pr.tone_score, pr.tone_notes)}
+              ${scoreBar("Accuracy", pr.accuracy_score, pr.accuracy_notes)}
+              ${scoreBar("Resolution", pr.resolution_score, pr.resolution_notes)}
+              ${scoreBar("Compliance", pr.compliance_score, pr.compliance_notes)}
+              ${scoreBar("Product Knowledge", pr.product_knowledge_score, pr.product_knowledge_notes)}
+              ${pr.issues ? `<p class="text-xs text-red-600 mt-2 whitespace-pre-line">${escHtml(pr.issues)}</p>` : ""}
+            </div>
+          `).join("")}
         </div>` : ""}
       </div>
     ` : `
