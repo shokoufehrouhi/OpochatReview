@@ -4,11 +4,24 @@ import fetch from "node-fetch";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import pg from "pg";
+const { Pool } = pg;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 const REVIEWS_FILE = path.join(__dirname, "reviews.json");
+
+// PostgreSQL (Railway) or fallback to reviews.json
+let pool = null;
+if (process.env.DATABASE_URL) {
+  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  pool.query(`CREATE TABLE IF NOT EXISTS reviews (
+    chat_id VARCHAR(255) PRIMARY KEY,
+    data JSONB NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW()
+  )`).then(() => console.log("[db] reviews table ready")).catch(e => console.error("[db] init error:", e.message));
+}
 const LC_API = "https://api.livechatinc.com/v3.6/agent/action";
 const LC_CONFIG_API = "https://api.livechatinc.com/v3.6/configuration/action";
 
@@ -52,6 +65,12 @@ async function lcPost(action, body, baseUrl = LC_API) {
 }
 
 async function loadReviews() {
+  if (pool) {
+    const res = await pool.query("SELECT chat_id, data FROM reviews");
+    const obj = {};
+    res.rows.forEach(r => obj[r.chat_id] = r.data);
+    return obj;
+  }
   try {
     const raw = await fs.readFile(REVIEWS_FILE, "utf8");
     return JSON.parse(raw);
@@ -61,6 +80,16 @@ async function loadReviews() {
 }
 
 async function saveReviews(reviews) {
+  if (pool) {
+    for (const [chatId, data] of Object.entries(reviews)) {
+      await pool.query(
+        `INSERT INTO reviews (chat_id, data, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (chat_id) DO UPDATE SET data = $2, updated_at = NOW()`,
+        [chatId, data]
+      );
+    }
+    return;
+  }
   await fs.writeFile(REVIEWS_FILE, JSON.stringify(reviews, null, 2));
 }
 
