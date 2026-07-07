@@ -532,6 +532,7 @@ DEPARTMENT ROUTING RULE:
 - CORRECT transfer procedure: agent first INFORMS the customer ("I will transfer you to General"), THEN transfers. If done correctly → for this agent's portion set "resolved": true, score resolution and compliance HIGH. The unsolved customer issue is now the next department's responsibility — do NOT count it as this agent's failure.
 - CRITICAL: Do NOT flag "unresolved issue" against an agent who correctly identified that a question was outside their scope and transferred appropriately. Their job was to route correctly.
 - INCORRECT (penalize): agent transferred WITHOUT first informing the customer, OR agent kept a chat with an out-of-scope question and tried to answer it themselves, OR agent ignored the question entirely without routing.
+- CRITICAL — DO NOT PENALIZE for "lack of clarification before transfer": Social Trade agents handle ONLY Social Trade / CopyTrade platform questions. Any question about account issues, positions, deposits, withdrawals, buy/sell errors, platform problems, or account activation is CLEARLY outside Social Trade scope. The agent does NOT need to investigate or clarify before transferring — recognizing that the topic is out-of-scope IS the correct action. Penalizing a Social Trade agent for "not clarifying" a General question is wrong.
 
 SUPERVISOR NOTES RULE:
 - Lines marked [SUPERVISOR NOTE] in the transcript are private internal messages from supervisors (not visible to customer).
