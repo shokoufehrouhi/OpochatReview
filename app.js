@@ -303,10 +303,12 @@ function renderTable() {
       <td class="px-4 py-3">
         <div class="flex flex-col gap-0.5">
           <div class="flex items-center gap-1">
+            <span class="text-gray-300 text-xs">T:</span>
             <span class="font-mono text-xs text-gray-400">${chat.thread_id || chat.id}</span>
             <button onclick="event.stopPropagation();copyId('${chat.thread_id || chat.id}')" title="Copy thread ID" class="shrink-0 text-gray-300 hover:text-blue-500 px-1 text-sm leading-none">⎘</button>
           </div>
           ${chat.id !== chat.thread_id ? `<div class="flex items-center gap-1">
+            <span class="text-gray-200 text-xs">C:</span>
             <span class="font-mono text-xs text-gray-300">${chat.id}</span>
             <button onclick="event.stopPropagation();copyId('${chat.id}')" title="Copy container ID" class="shrink-0 text-gray-200 hover:text-gray-400 px-1 text-xs leading-none">⎘</button>
           </div>` : ""}

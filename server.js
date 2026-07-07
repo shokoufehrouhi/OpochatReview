@@ -326,17 +326,27 @@ async function pollTelegram() {
 }
 
 function buildTranscript(events, users) {
-  return events
-    .filter((e) => e.text && (e.type === "message" || e.type === "annotation"))
-    .map((e) => {
-      const user = users.find((u) => u.id === e.author_id);
-      const role = user?.type || "unknown";
-      const name = user?.name || e.author_id;
+  const lines = [];
+  for (const e of events) {
+    const user = users.find((u) => u.id === e.author_id);
+    const role = user?.type || "unknown";
+    const name = user?.name || e.author_id;
+    const ts = e.created_at || "";
+
+    if (e.type === "filled_form" && Array.isArray(e.fields) && e.fields.length) {
+      const fields = e.fields
+        .map(f => `  ${f.label || f.id}: ${f.answer?.label ?? f.answer?.value ?? f.answer ?? ""}`)
+        .join("\n");
+      lines.push(`[${ts}] [PRE-CHAT FORM]\n${fields}`);
+    } else if (e.type === "system_message" && e.text) {
+      lines.push(`[${ts}] [SYSTEM] ${e.text}`);
+    } else if (e.text && (e.type === "message" || e.type === "annotation")) {
       const isPrivate = e.visibility === "agents" || e.type === "annotation";
       const prefix = isPrivate ? "[SUPERVISOR NOTE] " : "";
-      return `[${e.created_at || ""}] ${prefix}${name} (${role}): ${e.text}`;
-    })
-    .join("\n");
+      lines.push(`[${ts}] ${prefix}${name} (${role}): ${e.text}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function extractSupervisorNotes(events, users) {
@@ -513,15 +523,15 @@ SPECIAL RULE — ACCOUNT TYPES:
 - Whenever a customer asks about account types, account options, or account comparison, the agent MUST send BOTH: (1) the general account types macro (covering MT4/MT5/cTrader/OpoTrade) AND (2) the TradingView account types macro. If either one is missing, flag it as an issue in the resolution or accuracy notes.
 
 DEPARTMENT ROUTING RULE:
-- This broker has separate departments: General, Social Trade (CopyTrade), cTrader, KYC, etc. Customers self-select their department when starting a chat — the agent has NO control over which department the customer chose.
+- The transcript may begin with a [PRE-CHAT FORM] block showing which department the customer selected and their initial question. Use this to understand the routing context — BUT the customer's actual question may differ from their form selection (e.g. they selected "Social Trade" but ask about account activation).
 - Each department handles ONLY its own topics:
-  • Social Trade: questions about Social Trade / CopyTrade platform ONLY.
-  • General: account issues, deposits, withdrawals, platform problems, buy/sell errors, etc.
-  • KYC: identity verification, document submission, account activation.
-- If a customer's question is OUTSIDE the agent's department scope, the agent MUST transfer to the correct department.
-- CORRECT transfer procedure: agent first INFORMS the customer ("I will transfer you to General"), THEN transfers. If done → "resolved": true for this agent's portion, score resolution and compliance HIGH. The unresolved customer issue belongs to the NEXT department — do NOT count it as this agent's failure.
-- CRITICAL: Do NOT flag "unresolved issue" or "customer problem unaddressed" against an agent who correctly transferred a question that was outside their department scope. Their job was to route correctly, not solve the problem.
-- INCORRECT (penalize): agent transferred WITHOUT informing the customer first, OR agent kept a chat they should have transferred, OR agent tried to answer questions outside their scope.
+  • Social Trade / CopyTrade: ONLY questions about the Social Trade or CopyTrade platform (providers, followers, copy strategies).
+  • General: account issues, deposits, withdrawals, platform problems, buy/sell errors, KYC/activation, and everything NOT specific to Social Trade or KYC.
+  • KYC: identity verification, document submission.
+- The customer's pre-chat department selection does NOT bind the agent — what matters is the ACTUAL question asked. If the customer selected "Social Trade" but their real question is about something else (e.g. account activation, greyed-out buttons, deposits), the Social Trade agent MUST transfer to the appropriate department.
+- CORRECT transfer procedure: agent first INFORMS the customer ("I will transfer you to General"), THEN transfers. If done correctly → for this agent's portion set "resolved": true, score resolution and compliance HIGH. The unsolved customer issue is now the next department's responsibility — do NOT count it as this agent's failure.
+- CRITICAL: Do NOT flag "unresolved issue" against an agent who correctly identified that a question was outside their scope and transferred appropriately. Their job was to route correctly.
+- INCORRECT (penalize): agent transferred WITHOUT first informing the customer, OR agent kept a chat with an out-of-scope question and tried to answer it themselves, OR agent ignored the question entirely without routing.
 
 SUPERVISOR NOTES RULE:
 - Lines marked [SUPERVISOR NOTE] in the transcript are private internal messages from supervisors (not visible to customer).
