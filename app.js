@@ -481,11 +481,11 @@ function getEmployeeName(agentName, dateStr) {
   const full = agentName.toLowerCase().trim();
   const first = full.split(" ")[0];
   const mapping = agentShifts[full] || agentShifts[first];
-  if (!mapping) return null;
+  if (!mapping) return agentName;
   const h = getTehranHour(dateStr);
   const dayEnd = mapping.dayEnd || 16;
   const isDay = h >= 8 && h < dayEnd;
-  return (isDay ? mapping.day : mapping.night) || null;
+  return (isDay ? mapping.day : mapping.night) || agentName;
 }
 
 function updateChart() {
@@ -572,13 +572,9 @@ function getEmployee(agentName, dateStr) {
   const h = getTehranHour(dateStr);
   const dayEnd = mapping?.dayEnd || 16;
   const isDay = h >= 8 && h < dayEnd;
-  if (!mapping) {
-    console.log('[employee] no mapping for agent:', JSON.stringify(full), '| first:', JSON.stringify(first), '| keys:', Object.keys(agentShifts));
-    return `<span class="text-gray-300">—</span>`;
-  }
+  if (!mapping) return `<span class="font-medium text-gray-800">${agentName}</span>`;
   const name = isDay ? mapping.day : mapping.night;
-  console.log('[employee]', full, '| h:', h, '| isDay:', isDay, '| name:', name);
-  return name ? `<span class="font-medium text-gray-800">${name}</span>` : `<span class="text-gray-300">—</span>`;
+  return name ? `<span class="font-medium text-gray-800">${name}</span>` : `<span class="font-medium text-gray-800">${agentName}</span>`;
 }
 
 function shiftLabel(dateStr) {
