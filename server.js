@@ -551,7 +551,13 @@ SUPERVISOR NOTES RULE:
 - If a supervisor note contains a correction, warning, or instruction directed at the agent's behavior in this chat, set "supervisor_warning" to true and quote the note in "supervisor_warning_text".
 - Supervisor warnings must be factored into the overall assessment and flagged clearly in issues.
 
-SLA: first response <15s=10, 15-30s=8, 30-60s=6, >60s=4. Between replies: <45s good, 45-90s warning, >90s bad.
+RESPONSE TIME SCORING:
+- Measure the gap between each CUSTOMER message and the AGENT's next reply. Do NOT measure total conversation duration.
+- First response SLA: <15s=10, 15-30s=8, 30-60s=6, >60s=4.
+- Between replies: <45s good, 45-90s warning, >90s bad.
+- A long conversation with fast per-message replies = HIGH response time score. Do NOT penalize for total conversation length.
+- If an agent handles multiple questions in sequence (answering some, routing others), each reply is measured independently. Handling multiple topics is normal and does NOT indicate slow response.
+- NEVER say an agent "handled late" or "took too long" based on total conversation time — only base this on gaps between customer message and agent reply.
 overall_score = weighted avg: accuracy 20%, resolution 20%, compliance 15%, tone 15%, response_time 15%, product_knowledge 10%, satisfaction 3%, language 2%
 
 Return ONLY valid JSON:
