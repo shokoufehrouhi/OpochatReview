@@ -229,9 +229,12 @@ function renderTable() {
     return;
   }
 
-  tbody.innerHTML = displayChats.map(chat => {
+  const sortedChats = [...displayChats].sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+  tbody.innerHTML = sortedChats.map(chat => {
     const r = chat.review;
-    const date = chat.started_at ? new Date(chat.started_at).toLocaleDateString("en-GB") : "—";
+    const date = chat.started_at
+      ? new Date(chat.started_at).toLocaleString("en-GB", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
+      : "—";
     const scoreBadge = r ? scorePill(r.overall_score) : `<span class="text-gray-300 text-xs">—</span>`;
     const statusBadge = r
       ? `<span class="text-xs px-2 py-0.5 rounded-full ${r.resolved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}">${r.resolved ? "✓" : "✗"}</span>`
