@@ -457,6 +457,10 @@ async function openModal(chatId, threadId) {
 
     function renderPerAgentCard(pr) {
       return `<div class="mb-4 border border-gray-200 rounded-xl p-4">
+        ${pr.supervisor_warning ? `<div class="mb-3 bg-orange-50 border border-orange-300 rounded-lg px-3 py-2 flex gap-2">
+          <span class="text-orange-500 font-bold text-xs shrink-0">⚠ Supervisor Note</span>
+          <span class="text-xs text-orange-700">${escHtml(pr.supervisor_warning_text || "")}</span>
+        </div>` : ""}
         <div class="flex items-center justify-between mb-3">
           <p class="text-sm font-bold text-gray-700">${escHtml(pr.agent_name || "Agent")}</p>
           <span class="text-lg font-black ${scoreColor(pr.overall_score)}">${(pr.overall_score||0).toFixed(1)}</span>
@@ -479,10 +483,6 @@ async function openModal(chatId, threadId) {
     } else if (modalFilteredAgentName && modalPR) {
       // Employee-filtered mode: show only this agent's per-agent review
       reviewHtml = `<div>
-        ${r.supervisor_warning ? `<div class="mb-4 bg-orange-50 border border-orange-300 rounded-lg px-4 py-3 flex gap-2">
-          <span class="text-orange-500 font-bold text-sm shrink-0">⚠ Supervisor Warning</span>
-          <span class="text-sm text-orange-700">${escHtml(r.supervisor_warning_text || "")}</span>
-        </div>` : ""}
         <p class="text-xs text-gray-400 uppercase font-semibold mb-3">Review: ${escHtml(activeEmployeeShift.employee)} (${escHtml(modalFilteredAgentName)})</p>
         ${renderPerAgentCard(modalPR)}
         <div class="mt-3 pt-3 border-t border-gray-100">

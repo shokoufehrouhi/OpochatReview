@@ -312,14 +312,14 @@ function buildAgentSegments(events, users) {
     if (!isPrivate) {
       const user = users.find(u => u.id === e.author_id);
       if (user?.type === "agent" && !segments[user.id]) {
-        segments[user.id] = { id: user.id, name: user.name, events: [], responded: false };
+        segments[user.id] = { id: user.id, name: user.name, events: [], supervisorNotes: [], responded: false };
       }
     }
     if (e.type === "system_message" && e.text) {
       const lower = e.text.toLowerCase();
       for (const a of agentUsers) {
         if (!segments[a.id] && lower.includes(a.name.toLowerCase())) {
-          segments[a.id] = { id: a.id, name: a.name, events: [], responded: false };
+          segments[a.id] = { id: a.id, name: a.name, events: [], supervisorNotes: [], responded: false };
         }
       }
     }
@@ -327,16 +327,24 @@ function buildAgentSegments(events, users) {
 
   let currentAgent = null;
   for (const e of events) {
+    if (!e.text) continue;
     const isPrivate = e.visibility === "agents" || e.type === "annotation";
-    if (!e.text || isPrivate) continue;
 
-    const user = users.find(u => u.id === e.author_id);
-    if (user?.type === "agent") {
-      currentAgent = { id: user.id, name: user.name };
-      segments[user.id].responded = true;
-    }
-    if (currentAgent) {
-      segments[currentAgent.id].events.push(e);
+    if (!isPrivate) {
+      const user = users.find(u => u.id === e.author_id);
+      if (user?.type === "agent") {
+        currentAgent = { id: user.id, name: user.name };
+        segments[user.id].responded = true;
+      }
+      if (currentAgent) segments[currentAgent.id].events.push(e);
+    } else if (currentAgent && segments[currentAgent.id]) {
+      // Supervisor note during this agent's session — assign only to them
+      const supervisorUser = users.find(u => u.id === e.author_id);
+      segments[currentAgent.id].supervisorNotes.push({
+        author: supervisorUser?.name || e.author_id,
+        text: e.text,
+        created_at: e.created_at,
+      });
     }
   }
   return segments;
@@ -709,7 +717,7 @@ app.post("/api/review/:chatId", async (req, res) => {
             }
             return [
               agentId,
-              reviewWithClaude(buildTranscript(seg.events, users), chatId, chatStartedAt, supervisorNotes, seg.name)
+              reviewWithClaude(buildTranscript(seg.events, users), chatId, chatStartedAt, seg.supervisorNotes || [], seg.name)
                 .then(r => ({ ...r, agent_name: seg.name }))
                 .catch(() => null)
             ];
