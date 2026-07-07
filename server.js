@@ -21,6 +21,11 @@ if (process.env.DATABASE_URL) {
     data JSONB NOT NULL,
     updated_at TIMESTAMP DEFAULT NOW()
   )`).then(() => console.log("[db] reviews table ready")).catch(e => console.error("[db] init error:", e.message));
+  pool.query(`CREATE TABLE IF NOT EXISTS agent_shifts (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    data JSONB NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW()
+  )`).then(() => console.log("[db] agent_shifts table ready")).catch(e => console.error("[db] shifts init error:", e.message));
 }
 const LC_API = "https://api.livechatinc.com/v3.6/agent/action";
 const LC_CONFIG_API = "https://api.livechatinc.com/v3.6/configuration/action";
@@ -798,17 +803,40 @@ app.get("/api/agent-names", async (req, res) => {
 });
 
 // Agent shift mapping
-app.get("/api/agent-shifts", async (req, res) => {
+async function loadShifts() {
+  if (pool) {
+    try {
+      const r = await pool.query("SELECT data FROM agent_shifts WHERE id = 1");
+      if (r.rows.length > 0) return r.rows[0].data;
+    } catch {}
+  }
   try {
     const data = await fs.readFile(path.join(DATA_DIR, "agent_shifts.json"), "utf8");
-    res.json(JSON.parse(data));
-  } catch { res.json({}); }
+    return JSON.parse(data);
+  } catch { return []; }
+}
+
+async function saveShifts(shifts) {
+  if (pool) {
+    await pool.query(
+      `INSERT INTO agent_shifts (id, data, updated_at) VALUES (1, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET data = $1, updated_at = NOW()`,
+      [JSON.stringify(shifts)]
+    );
+    return;
+  }
+  await fs.writeFile(path.join(DATA_DIR, "agent_shifts.json"), JSON.stringify(shifts, null, 2));
+}
+
+app.get("/api/agent-shifts", async (req, res) => {
+  try {
+    res.json(await loadShifts());
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/api/agent-shifts", async (req, res) => {
   try {
-    const shifts = req.body;
-    await fs.writeFile(path.join(DATA_DIR, "agent_shifts.json"), JSON.stringify(shifts, null, 2));
+    await saveShifts(req.body);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
