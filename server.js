@@ -21,18 +21,27 @@ if (process.env.DATABASE_URL) {
     data JSONB NOT NULL,
     updated_at TIMESTAMP DEFAULT NOW()
   )`).then(() => console.log("[db] reviews table ready")).catch(e => console.error("[db] init error:", e.message));
-  pool.query(`CREATE TABLE IF NOT EXISTS agent_shifts (
-    id SERIAL PRIMARY KEY,
-    employee VARCHAR(255) NOT NULL,
-    agent_key VARCHAR(255) NOT NULL,
-    start_hour INTEGER NOT NULL,
-    end_hour INTEGER NOT NULL
-  )`).then(async () => {
-    console.log("[db] agent_shifts table ready");
-    // Seed from file if DB is empty
+  (async () => {
     try {
-      const existing = await pool.query("SELECT COUNT(*) FROM agent_shifts");
-      if (parseInt(existing.rows[0].count) === 0) {
+      // Migrate old JSON-blob schema to per-record schema if needed
+      const oldCol = await pool.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name='agent_shifts' AND column_name='data'`);
+      if (oldCol.rows.length > 0) {
+        console.log("[db] migrating agent_shifts from old schema");
+        await pool.query("DROP TABLE agent_shifts");
+      }
+      await pool.query(`CREATE TABLE IF NOT EXISTS agent_shifts (
+        id SERIAL PRIMARY KEY,
+        employee VARCHAR(255) NOT NULL,
+        agent_key VARCHAR(255) NOT NULL,
+        start_hour INTEGER NOT NULL,
+        end_hour INTEGER NOT NULL
+      )`);
+      console.log("[db] agent_shifts table ready");
+      // Seed from file if empty
+      const cnt = await pool.query("SELECT COUNT(*) FROM agent_shifts");
+      if (parseInt(cnt.rows[0].count) === 0) {
         const raw = await fs.readFile(path.join(__dirname, "data", "agent_shifts.json"), "utf8");
         const shifts = JSON.parse(raw);
         for (const s of shifts) {
@@ -41,10 +50,10 @@ if (process.env.DATABASE_URL) {
             [s.employee, s.agentKey, s.start, s.end]
           );
         }
-        console.log("[db] agent_shifts seeded from file:", shifts.length, "rows");
+        console.log("[db] agent_shifts seeded:", shifts.length, "rows");
       }
-    } catch (e) { console.log("[db] shifts seed skipped:", e.message); }
-  }).catch(e => console.error("[db] shifts init error:", e.message));
+    } catch (e) { console.error("[db] shifts init error:", e.message); }
+  })();
 }
 const LC_API = "https://api.livechatinc.com/v3.6/agent/action";
 const LC_CONFIG_API = "https://api.livechatinc.com/v3.6/configuration/action";
