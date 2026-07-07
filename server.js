@@ -322,6 +322,8 @@ app.get("/api/debug-env", (req, res) => {
     account_id: process.env.LIVECHAT_ACCOUNT_ID || "NOT SET",
     pat_length: (process.env.LIVECHAT_PAT || "").length,
     pat_preview: (process.env.LIVECHAT_PAT || "").slice(0, 15) + "...",
+    database_url: process.env.DATABASE_URL ? "SET (length " + process.env.DATABASE_URL.length + ")" : "NOT SET",
+    db_pool: pool ? "active" : "null (file fallback)",
   });
 });
 
