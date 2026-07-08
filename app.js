@@ -667,13 +667,10 @@ async function openModal(chatId, threadId) {
         </div>
       </div>`;
     } else if (modalFilteredAgentName && !modalPR) {
-      // Employee filtered but no per-agent review yet
+      // No per-agent review — single-agent chat, fall back to overall review
       reviewHtml = `<div>
-        <p class="text-xs text-gray-400 mb-3">No per-agent review for ${escHtml(modalFilteredAgentName)} yet.</p>
-        <p class="text-xs text-gray-400">Re-review this chat to generate per-agent scores.</p>
-        <div class="mt-3 pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Overall: <span class="font-semibold">${(r.overall_score||0).toFixed(1)}</span></p>
-        </div>
+        <p class="text-xs text-gray-400 uppercase font-semibold mb-3">Review: ${escHtml(activeEmployeeShift.employee)} (${escHtml(modalFilteredAgentName)})</p>
+        ${renderPerAgentCard({ ...r, agent_name: modalFilteredAgentName })}
       </div>`;
     } else {
       // All employees mode: full review
