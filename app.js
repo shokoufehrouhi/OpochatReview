@@ -366,7 +366,10 @@ async function reviewChat(chatId, threadId, btn) {
     updateStats();
     updateChart();
   } catch (e) {
-    actionCell.innerHTML = `<span class="text-xs text-red-500">Error</span>`;
+    actionCell.innerHTML = `<div class="flex items-center gap-1">
+      <span class="text-xs text-red-500">Error</span>
+      <button onclick="reviewChat('${chatId}','${threadId||''}',this)" class="text-xs text-gray-400 hover:text-orange-500 px-1" title="Re-review">↺</button>
+    </div>`;
     showStatus("Review failed: " + e.message, "error");
   }
 }
@@ -433,11 +436,17 @@ async function reviewAllVisible() {
           </div>`;
         } else {
           failed++;
-          if (actionCell) actionCell.innerHTML = `<span class="text-xs text-red-400">Failed</span>`;
+          if (actionCell) actionCell.innerHTML = `<div class="flex items-center gap-1">
+            <span class="text-xs text-red-400">Failed</span>
+            <button onclick="reviewChat('${chat.id}','${tid}',this)" class="text-xs text-gray-400 hover:text-orange-500 px-1" title="Re-review">↺</button>
+          </div>`;
         }
       } catch {
         failed++;
-        if (actionCell) actionCell.innerHTML = `<span class="text-xs text-red-400">Error</span>`;
+        if (actionCell) actionCell.innerHTML = `<div class="flex items-center gap-1">
+          <span class="text-xs text-red-400">Error</span>
+          <button onclick="reviewChat('${chat.id}','${tid}',this)" class="text-xs text-gray-400 hover:text-orange-500 px-1" title="Re-review">↺</button>
+        </div>`;
       }
       updateStats();
       updateChart();
