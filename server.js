@@ -488,12 +488,9 @@ async function pollTelegram() {
 
 function detectPrechatLanguage(events) {
   const form = events.find(e => e.type === "filled_form" && Array.isArray(e.fields));
-  if (!form) {
-    const formAny = events.find(e => e.type === "filled_form");
-    console.log(`[lang-debug] no filled_form with fields array. filled_form event:`, JSON.stringify(formAny || null));
-    return null;
-  }
-  console.log(`[lang-debug] form fields:`, JSON.stringify(form.fields));
+  if (!form) return null;
+
+  // 1. Check for explicit language selector field first
   for (const f of form.fields) {
     const val = (f.answer?.label ?? f.answer?.value ?? f.answer ?? "").toString().trim().toLowerCase();
     if (!val) continue;
@@ -501,6 +498,17 @@ function detectPrechatLanguage(events) {
     if (val.includes("arabic") || val.includes("عربي") || val.includes("عربى") || val === "ar") return "arabic";
     if (val.includes("farsi") || val.includes("persian") || val.includes("فارسی") || val.includes("فارسي") || val === "fa") return "farsi";
   }
+
+  // 2. Fall back: detect language from customer's written text in question/text fields
+  for (const f of form.fields) {
+    if (["name","email","group_chooser","radio","checkbox"].includes(f.type)) continue;
+    const text = (f.answer?.label ?? f.answer?.value ?? f.answer ?? "").toString().trim();
+    if (text.length < 5) continue;
+    const lang = detectTextLanguage(text);
+    if (lang === "farsi_or_arabic") return "farsi_or_arabic";
+    if (lang === "latin") return "english";
+  }
+
   return null;
 }
 
@@ -539,9 +547,10 @@ function detectLanguageViolations(events, users) {
     const combined = texts.join(" ");
     const agentLang = detectTextLanguage(combined);
     const mismatch = (
-      (prechatLang === "english" && agentLang === "farsi_or_arabic") ||
-      (prechatLang === "farsi"   && agentLang === "latin") ||
-      (prechatLang === "arabic"  && agentLang === "latin")
+      (prechatLang === "english"         && agentLang === "farsi_or_arabic") ||
+      (prechatLang === "farsi"           && agentLang === "latin") ||
+      (prechatLang === "arabic"          && agentLang === "latin") ||
+      (prechatLang === "farsi_or_arabic" && agentLang === "latin")
     );
     if (mismatch) {
       violations.set(agentName.toLowerCase(), { prechatLang, agentLang });
@@ -558,10 +567,10 @@ function applyLanguagePenalty(review, agentName, violation) {
     compliance_score: 1,
     resolution_score: 1,
     tone_score: 1,
-    language_notes: `CRITICAL VIOLATION: Customer selected ${violation.prechatLang.toUpperCase()} in pre-chat form but agent responded in a different language. This is the most severe violation.`,
-    compliance_notes: `CRITICAL: Agent ignored customer's pre-chat language selection (${violation.prechatLang}). Mandatory penalty applied.`,
-    resolution_notes: `CRITICAL: Chat was ineffective because agent responded in wrong language. Customer could not be properly assisted.`,
-    issues: [`CRITICAL: Wrong language — customer selected ${violation.prechatLang.toUpperCase()} but agent used a different language`, ...(review.issues || []).slice(0, 2)],
+    language_notes: `CRITICAL VIOLATION: Customer communicated in ${violation.prechatLang} (detected from pre-chat form) but agent responded in a completely different language. Most severe violation.`,
+    compliance_notes: `CRITICAL: Agent ignored customer's language (${violation.prechatLang} detected from pre-chat). Must respond in customer's language. Mandatory penalty applied.`,
+    resolution_notes: `CRITICAL: Chat was ineffective — agent responded in wrong language, customer could not be properly assisted.`,
+    issues: [`CRITICAL: Wrong language — customer wrote in ${violation.prechatLang} but agent responded in a different language`, ...(review.issues || []).slice(0, 2)],
     _language_penalty: true,
   };
   return penalized;
