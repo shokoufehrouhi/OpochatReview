@@ -488,7 +488,12 @@ async function pollTelegram() {
 
 function detectPrechatLanguage(events) {
   const form = events.find(e => e.type === "filled_form" && Array.isArray(e.fields));
-  if (!form) return null;
+  if (!form) {
+    const formAny = events.find(e => e.type === "filled_form");
+    console.log(`[lang-debug] no filled_form with fields array. filled_form event:`, JSON.stringify(formAny || null));
+    return null;
+  }
+  console.log(`[lang-debug] form fields:`, JSON.stringify(form.fields));
   for (const f of form.fields) {
     const val = (f.answer?.label ?? f.answer?.value ?? f.answer ?? "").toString().trim().toLowerCase();
     if (!val) continue;
