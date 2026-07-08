@@ -270,18 +270,23 @@ function renderTable() {
 
     // When employee filter is active, show per-agent score; otherwise overall
     let displayScore = null, displayResolved = r?.resolved;
-    if (activeEmployeeShift && filteredAgentName && r) {
+    const isSkipped = r?.skipped === true;
+    if (!isSkipped && activeEmployeeShift && filteredAgentName && r) {
       const pr = getPerAgentReview(r, filteredAgentName);
       displayScore = pr ? pr.overall_score : null;
-      displayResolved = r.resolved; // keep overall resolved status
-    } else {
+      displayResolved = r.resolved;
+    } else if (!isSkipped) {
       displayScore = r?.overall_score ?? null;
     }
 
-    const scoreBadge = displayScore != null ? scorePill(displayScore) : `<span class="text-gray-300 text-xs">—</span>`;
-    const statusBadge = r
-      ? `<span class="text-xs px-2 py-0.5 rounded-full ${displayResolved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}">${displayResolved ? "✓" : "✗"}</span>`
-      : `<span class="text-gray-300 text-xs">—</span>`;
+    const scoreBadge = isSkipped
+      ? `<span class="text-xs text-gray-400 italic">No msg</span>`
+      : displayScore != null ? scorePill(displayScore) : `<span class="text-gray-300 text-xs">—</span>`;
+    const statusBadge = isSkipped
+      ? `<span class="text-gray-300 text-xs">—</span>`
+      : r
+        ? `<span class="text-xs px-2 py-0.5 rounded-full ${displayResolved ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}">${displayResolved ? "✓" : "✗"}</span>`
+        : `<span class="text-gray-300 text-xs">—</span>`;
     const langBadge = r?.language_detected ? `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">${r.language_detected.toUpperCase()}</span>` : "—";
     const shiftBadge = shiftLabel(chat.started_at);
     const allAgents = chat.agents?.length > 0 ? chat.agents : (chat.agent ? [chat.agent] : []);
@@ -405,6 +410,7 @@ async function reviewAllVisible() {
     pageId = pageData.next_page_id || null;
     const needsReview = (c) => {
       if (!c.review) return true;
+      if (c.review.skipped) return false; // no customer messages — nothing to review
       const pa = c.review.per_agent_reviews;
       if (pa && Object.values(pa).some(r => r && r._error)) return true;
       return false;
@@ -669,7 +675,7 @@ function closeModal() {
 // ── Stats & Chart ─────────────────────────────────────────────────────────────
 function updateStats() {
   const filtered = applyEmployeeHourFilter(allChats);
-  const reviewed = filtered.filter(c => c.review);
+  const reviewed = filtered.filter(c => c.review && !c.review.skipped);
   const scores = reviewed.map(c => c.review.overall_score).filter(Boolean);
   const resolved = reviewed.filter(c => c.review.resolved).length;
 
@@ -691,7 +697,7 @@ function getEmployeeName(agentName, dateStr) {
 function updateChart() {
   const byEmployee = {};
   for (const chat of applyEmployeeHourFilter(allChats)) {
-    if (!chat.review || !chat.agent) continue;
+    if (!chat.review || chat.review.skipped || !chat.agent) continue;
     const emp = getEmployeeName(chat.agent.name, chat.started_at) || chat.agent.name;
     if (!byEmployee[emp]) byEmployee[emp] = [];
     byEmployee[emp].push(chat.review.overall_score);

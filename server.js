@@ -918,6 +918,17 @@ app.post("/api/review/:chatId", async (req, res) => {
     const chatStartedAt3 = thread.created_at || null;
     const shifts3 = await loadShifts();
 
+    // If the customer never sent a single message, there is nothing to review
+    const customerMessages = events.filter(e => {
+      const u = users.find(u2 => u2.id === e.author_id);
+      return e.type === "message" && u?.type === "customer" && e.text;
+    });
+    if (customerMessages.length === 0) {
+      const skippedReview = { skipped: true, reason: "Customer left without sending any message" };
+      await saveReview(thread.id || chatId, skippedReview);
+      return res.json({ review: skippedReview });
+    }
+
     const transcript = buildTranscript(events, users);
     const supervisorNotes = extractSupervisorNotes(events, users);
     const agentSegments = buildAgentSegments(events, users, shifts3, chatStartedAt3);
