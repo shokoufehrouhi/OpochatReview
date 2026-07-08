@@ -266,11 +266,17 @@ async function lcPost(action, body, baseUrl = LC_API) {
   return res.json();
 }
 
+let _reviewsCache = null;
+let _reviewsCacheAt = 0;
 async function loadReviews() {
+  // 10 second cache to avoid hammering DB on paginated /api/chats background fetches
+  if (_reviewsCache && Date.now() - _reviewsCacheAt < 10000) return _reviewsCache;
   if (pool) {
     const res = await pool.query("SELECT chat_id, data FROM reviews");
     const obj = {};
     res.rows.forEach(r => obj[r.chat_id] = r.data);
+    _reviewsCache = obj;
+    _reviewsCacheAt = Date.now();
     return obj;
   }
   try {
@@ -282,6 +288,7 @@ async function loadReviews() {
 }
 
 async function saveReviews(reviews) {
+  _reviewsCache = null; // invalidate cache on write
   if (pool) {
     for (const [chatId, data] of Object.entries(reviews)) {
       await pool.query(
@@ -915,7 +922,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
     if (date_to) filters.to = date_to;
     if (agent_id) filters.agents = { values: [agent_id] };
 
-    const body = page_id ? { page_id } : { filters, limit: 25 };
+    const body = page_id ? { page_id, limit: 100 } : { filters, limit: 100 };
 
     console.log('[chats] sending body:', JSON.stringify(body));
     const data = await lcPost("list_archives", body);
