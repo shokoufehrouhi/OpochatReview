@@ -77,9 +77,12 @@
     <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
       <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
         <h2 class="text-sm font-semibold text-gray-700">Chats</h2>
-        <button id="btnReviewAll" class="hidden text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition">
-          Review All with AI
-        </button>
+        <div class="flex items-center gap-2">
+          <button id="btnRefreshList" onclick="refreshChatList()" class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition" title="Refresh list">⟳ Refresh</button>
+          <button id="btnReviewAll" class="hidden text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition">
+            Review All with AI
+          </button>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">

@@ -495,6 +495,15 @@ async function reviewChat(chatId, threadId, btn) {
 }
 
 // ── Review all pages ──────────────────────────────────────────────────────────
+async function refreshChatList() {
+  const btn = document.getElementById("btnRefreshList");
+  btn.textContent = "⟳ ...";
+  btn.disabled = true;
+  await loadChats(null);
+  btn.textContent = "⟳ Refresh";
+  btn.disabled = false;
+}
+
 async function reviewAllVisible() {
   const btn = document.getElementById("btnReviewAll");
   btn.disabled = true;
