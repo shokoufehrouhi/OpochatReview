@@ -160,6 +160,15 @@ if (process.env.DATABASE_URL) {
       console.log("[db] app_users table ready");
     } catch (e) { console.error("[db] app_users init error:", e.message); }
   })();
+
+  // ── reports table ────────────────────────────────────────────────────────
+  pool.query(`CREATE TABLE IF NOT EXISTS reports (
+    employee TEXT NOT NULL,
+    month TEXT NOT NULL,
+    data JSONB,
+    generated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (employee, month)
+  )`).then(() => console.log("[db] reports table ready")).catch(e => console.error("[db] reports init:", e.message));
 }
 const LC_API = "https://api.livechatinc.com/v3.6/agent/action";
 const LC_CONFIG_API = "https://api.livechatinc.com/v3.6/configuration/action";
@@ -1571,6 +1580,196 @@ async function runNightlyReview() {
 }
 
 // Nightly auto-review disabled — enable by uncommenting below
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+// List reports (admin: all; employee: own)
+app.get("/api/reports", authMiddleware, async (req, res) => {
+  try {
+    if (!pool) return res.json([]);
+    let rows;
+    if (req.user.role === "admin") {
+      rows = await pool.query("SELECT employee, month, generated_at FROM reports ORDER BY month DESC, employee ASC");
+    } else {
+      rows = await pool.query("SELECT employee, month, generated_at FROM reports WHERE employee=$1 ORDER BY month DESC", [req.user.employee_name]);
+    }
+    res.json(rows.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get specific report
+app.get("/api/reports/:employee/:month", authMiddleware, async (req, res) => {
+  try {
+    if (!pool) return res.status(404).json({ error: "No DB" });
+    const { employee, month } = req.params;
+    if (req.user.role !== "admin" && req.user.employee_name !== employee)
+      return res.status(403).json({ error: "Forbidden" });
+    const r = await pool.query("SELECT data FROM reports WHERE employee=$1 AND month=$2", [employee, month]);
+    if (!r.rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(r.rows[0].data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Save admin notes on a report
+app.patch("/api/reports/:employee/:month", authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { employee, month } = req.params;
+    const { admin_notes } = req.body;
+    await pool.query(
+      "UPDATE reports SET data = jsonb_set(data, '{admin_notes}', $3::jsonb) WHERE employee=$1 AND month=$2",
+      [employee, month, JSON.stringify(admin_notes)]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Generate monthly report (admin only)
+app.post("/api/reports/generate", authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { employee, month } = req.body; // month = "2026-07"
+    if (!employee || !month) return res.status(400).json({ error: "employee and month required" });
+
+    const shifts = await loadShifts();
+    const shift = shifts.find(s => s.employee === employee);
+    if (!shift) return res.status(404).json({ error: "Employee not found in shifts" });
+
+    // Date range
+    const [year, mon] = month.split("-").map(Number);
+    const lastDay = new Date(year, mon, 0).getDate();
+    const dateFrom = `${month}-01T00:00:00.000000+00:00`;
+    const dateTo   = `${month}-${String(lastDay).padStart(2,"0")}T23:59:59.999999+00:00`;
+
+    // Find LiveChat agent
+    const agentsData = await lcPost("list_agents", {}, LC_CONFIG_API);
+    const agentList = Array.isArray(agentsData) ? agentsData : (agentsData?.agents || []);
+    const agentUser = agentList.find(a => {
+      const k = a.name.toLowerCase().trim();
+      return k === shift.agentKey || k.split(" ")[0] === shift.agentKey;
+    });
+
+    // Fetch all chats for this agent in this month (paginated)
+    let allMonthChats = [];
+    let pageId = null;
+    let totalChats = 0;
+    do {
+      const body = pageId
+        ? { page_id: pageId }
+        : { filters: { from: dateFrom, to: dateTo, ...(agentUser ? { agents: { values: [agentUser.id] } } : {}) }, limit: 100 };
+      const data = await lcPost("list_archives", body);
+      if (!pageId) totalChats = data.found_chats || 0;
+      allMonthChats.push(...(data.chats || []));
+      pageId = data.next_page_id || null;
+    } while (pageId);
+
+    const reviews = await loadReviews();
+
+    const scoreFields = ["overall","response_time","tone","accuracy","resolution","compliance","product_knowledge","satisfaction","language"];
+    const sums = Object.fromEntries(scoreFields.map(f => [f, 0]));
+    const cnts = Object.fromEntries(scoreFields.map(f => [f, 0]));
+    let reviewedChats = 0, missedChats = 0, resolvedCount = 0;
+    let totalDurSec = 0, durCount = 0, totalFirstResSec = 0, firstResCount = 0;
+    const weekData = {};
+    const allIssues = [], allStrengths = [];
+
+    for (const chat of allMonthChats) {
+      const thread = chat.thread || (Array.isArray(chat.threads) ? chat.threads[0] : null) || {};
+      const startedAt = thread.created_at || null;
+      const endedAt   = thread.ended_at   || null;
+      if (!startedAt) continue;
+
+      // Filter by shift hours
+      const h = getTehranHourFromIso(startedAt);
+      if (h < shift.start || h >= shift.end) continue;
+
+      // Chat duration
+      if (endedAt) {
+        const dur = (new Date(endedAt) - new Date(startedAt)) / 1000;
+        if (dur > 0 && dur < 10800) { totalDurSec += dur; durCount++; }
+      }
+
+      // First response time from events
+      const events = thread.events || [];
+      const users = chat.users || [];
+      const custMsgs = events.filter(e => e.type === "message" && users.find(u => u.id === e.author_id)?.type === "customer");
+      const agentMsgs = events.filter(e => e.type === "message" && users.find(u => u.id === e.author_id)?.type === "agent" && e.visibility !== "agents");
+      if (custMsgs[0] && agentMsgs[1]) { // skip auto-greeting (first agent msg)
+        const rt = (new Date(agentMsgs[1].created_at) - new Date(custMsgs[0].created_at)) / 1000;
+        if (rt >= 0 && rt < 300) { totalFirstResSec += rt; firstResCount++; }
+      }
+
+      // Find review
+      const reviewKey = thread.id || chat.id;
+      const review = reviews[reviewKey];
+      if (!review || review.skipped) continue;
+      reviewedChats++;
+      if (review.resolved) resolvedCount++;
+
+      // Get agent-specific score
+      let ar = review;
+      if (review.per_agent_reviews) {
+        const pr = Object.values(review.per_agent_reviews).find(r =>
+          r && r.agent_name && r.agent_name.toLowerCase().trim().startsWith(shift.agentKey)
+        );
+        if (pr) ar = pr;
+      }
+
+      if (ar.overall_score === 0) missedChats++;
+
+      const scoreMap = { overall: ar.overall_score, response_time: ar.response_time_score, tone: ar.tone_score,
+        accuracy: ar.accuracy_score, resolution: ar.resolution_score, compliance: ar.compliance_score,
+        product_knowledge: ar.product_knowledge_score, satisfaction: ar.satisfaction_score, language: ar.language_score };
+      for (const [k, v] of Object.entries(scoreMap)) {
+        if (v != null && v > 0) { sums[k] += v; cnts[k]++; }
+      }
+
+      // Weekly trend (by week-of-month)
+      const dayOfMonth = new Date(startedAt).getDate();
+      const weekLabel = `Week ${Math.ceil(dayOfMonth / 7)}`;
+      if (!weekData[weekLabel]) weekData[weekLabel] = { sum: 0, cnt: 0 };
+      if (ar.overall_score != null) { weekData[weekLabel].sum += ar.overall_score; weekData[weekLabel].cnt++; }
+
+      if (ar.issues) allIssues.push(...(Array.isArray(ar.issues) ? ar.issues : [ar.issues]).filter(Boolean));
+      if (ar.strengths) allStrengths.push(...(Array.isArray(ar.strengths) ? ar.strengths : [ar.strengths]).filter(Boolean));
+    }
+
+    const avgScores = Object.fromEntries(scoreFields.map(f => [f, cnts[f] > 0 ? +(sums[f]/cnts[f]).toFixed(2) : null]));
+
+    // Top issues/strengths by frequency
+    const freq = arr => [...arr.reduce((m, v) => m.set(v, (m.get(v)||0)+1), new Map())]
+      .sort((a,b) => b[1]-a[1]).map(([v]) => v);
+
+    const report = {
+      employee, agent_key: shift.agentKey, month,
+      generated_at: new Date().toISOString(),
+      generated_by: req.user.username,
+      total_chats: totalChats,
+      reviewed_chats: reviewedChats,
+      missed_chats: missedChats,
+      resolved_count: resolvedCount,
+      resolved_rate: reviewedChats > 0 ? Math.round(resolvedCount/reviewedChats*100) : 0,
+      avg_scores: avgScores,
+      score_trend: Object.entries(weekData).sort(([a],[b]) => a.localeCompare(b))
+        .map(([label, d]) => ({ label, avg: d.cnt > 0 ? +(d.sum/d.cnt).toFixed(2) : null, count: d.cnt })),
+      avg_chat_duration_sec: durCount > 0 ? Math.round(totalDurSec/durCount) : null,
+      avg_first_response_sec: firstResCount > 0 ? Math.round(totalFirstResSec/firstResCount) : null,
+      top_issues: freq(allIssues).slice(0, 5),
+      top_strengths: freq(allStrengths).slice(0, 3),
+      admin_notes: "",
+    };
+
+    if (pool) {
+      await pool.query(
+        `INSERT INTO reports (employee, month, data, generated_at) VALUES ($1,$2,$3,NOW())
+         ON CONFLICT (employee, month) DO UPDATE SET data=$3, generated_at=NOW()`,
+        [employee, month, report]
+      );
+    }
+    res.json(report);
+  } catch (e) {
+    console.error("[report] generate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // cron.schedule("30 20 * * *", runNightlyReview, { timezone: "UTC" });
 // console.log("[nightly] Scheduled auto-review at 00:00 Tehran time (20:30 UTC)");
 

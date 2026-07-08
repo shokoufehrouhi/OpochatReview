@@ -1195,3 +1195,219 @@ async function saveSettings() {
     showStatus("Save failed: " + e.message, "error");
   }
 }
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+function closeReports() {
+  document.getElementById("reportsModal").classList.add("hidden");
+}
+
+async function openReports() {
+  document.getElementById("reportsModal").classList.remove("hidden");
+  const el = document.getElementById("reportsContent");
+  el.innerHTML = `<div class="text-center text-gray-400 py-8"><span class="spinner"></span></div>`;
+
+  const [listRes] = await Promise.all([authFetch("/api/reports")]);
+  const list = await listRes.json();
+
+  if (currentUser?.role === "admin") {
+    el.innerHTML = renderReportsAdmin(list);
+  } else {
+    el.innerHTML = renderReportsEmployee(list);
+  }
+}
+
+function fmtDuration(sec) {
+  if (!sec) return "—";
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function scoreColor(s) {
+  if (s == null) return "text-gray-400";
+  return s >= 7 ? "text-green-600" : s >= 5 ? "text-yellow-600" : "text-red-600";
+}
+
+function renderScoreRow(label, val) {
+  if (val == null) return "";
+  const pct = (val / 10) * 100;
+  const bg = val >= 7 ? "bg-green-500" : val >= 5 ? "bg-yellow-400" : "bg-red-500";
+  return `<div class="flex items-center gap-2 mb-1">
+    <span class="text-xs text-gray-500 w-36 shrink-0">${label}</span>
+    <div class="flex-1 bg-gray-100 rounded-full h-2"><div class="${bg} h-2 rounded-full" style="width:${pct}%"></div></div>
+    <span class="text-xs font-semibold w-8 text-right ${scoreColor(val)}">${val.toFixed(1)}</span>
+  </div>`;
+}
+
+function renderReportView(r) {
+  const s = r.avg_scores || {};
+  const trend = (r.score_trend || []).map(w =>
+    `<div class="text-center"><div class="text-xs text-gray-400">${escHtml(w.label)}</div>
+     <div class="text-lg font-black ${scoreColor(w.avg)}">${w.avg != null ? w.avg.toFixed(1) : "—"}</div>
+     <div class="text-xs text-gray-400">${w.count} chat</div></div>`
+  ).join("");
+
+  return `
+  <div class="space-y-5">
+    <div class="flex flex-wrap gap-3">
+      ${[
+        ["Total Chats", r.total_chats, "text-blue-600"],
+        ["Reviewed", r.reviewed_chats, "text-purple-600"],
+        ["Missed", r.missed_chats, "text-red-500"],
+        ["Resolved", r.resolved_rate + "%", "text-green-600"],
+      ].map(([l,v,c]) => `<div class="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-center min-w-[90px]">
+        <div class="text-xs text-gray-400 mb-1">${l}</div>
+        <div class="text-xl font-black ${c}">${v ?? "—"}</div>
+      </div>`).join("")}
+      <div class="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-center min-w-[90px]">
+        <div class="text-xs text-gray-400 mb-1">Avg Duration</div>
+        <div class="text-xl font-black text-gray-700">${fmtDuration(r.avg_chat_duration_sec)}</div>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-center min-w-[90px]">
+        <div class="text-xs text-gray-400 mb-1">First Response</div>
+        <div class="text-xl font-black text-gray-700">${fmtDuration(r.avg_first_response_sec)}</div>
+      </div>
+    </div>
+
+    <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+      <p class="text-xs font-semibold text-gray-500 uppercase mb-3">Score Breakdown</p>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-xs text-gray-500 w-36">Overall Avg</span>
+        <span class="text-2xl font-black ${scoreColor(s.overall)}">${s.overall?.toFixed(1) ?? "—"}</span>
+      </div>
+      ${renderScoreRow("Response Time", s.response_time)}
+      ${renderScoreRow("Tone", s.tone)}
+      ${renderScoreRow("Accuracy", s.accuracy)}
+      ${renderScoreRow("Resolution", s.resolution)}
+      ${renderScoreRow("Compliance", s.compliance)}
+      ${renderScoreRow("Product Knowledge", s.product_knowledge)}
+      ${renderScoreRow("Satisfaction", s.satisfaction)}
+      ${renderScoreRow("Language", s.language)}
+    </div>
+
+    ${trend ? `<div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+      <p class="text-xs font-semibold text-gray-500 uppercase mb-3">Weekly Trend</p>
+      <div class="flex gap-4 justify-around">${trend}</div>
+    </div>` : ""}
+
+    ${r.top_issues?.length ? `<div class="bg-red-50 border border-red-100 rounded-xl p-4">
+      <p class="text-xs font-semibold text-red-600 uppercase mb-2">Common Issues</p>
+      <ul class="space-y-1">${r.top_issues.map(i => `<li class="text-xs text-red-700">• ${escHtml(i)}</li>`).join("")}</ul>
+    </div>` : ""}
+
+    ${r.top_strengths?.length ? `<div class="bg-green-50 border border-green-100 rounded-xl p-4">
+      <p class="text-xs font-semibold text-green-600 uppercase mb-2">Strengths</p>
+      <ul class="space-y-1">${r.top_strengths.map(i => `<li class="text-xs text-green-700">• ${escHtml(i)}</li>`).join("")}</ul>
+    </div>` : ""}
+
+    <div class="bg-blue-50 border border-blue-100 rounded-xl p-4">
+      <p class="text-xs font-semibold text-blue-600 uppercase mb-2">Admin Notes</p>
+      ${currentUser?.role === "admin"
+        ? `<textarea id="reportNotes" class="w-full text-sm border border-gray-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" rows="3" placeholder="Add notes...">${escHtml(r.admin_notes || "")}</textarea>
+           <button onclick="saveReportNotes('${escHtml(r.employee)}','${escHtml(r.month)}')" class="mt-2 bg-blue-600 text-white px-3 py-1.5 text-xs rounded-lg hover:bg-blue-700">Save Notes</button>`
+        : `<p class="text-sm text-blue-700">${r.admin_notes || "—"}</p>`
+      }
+    </div>
+  </div>`;
+}
+
+function renderReportsAdmin(list) {
+  const months = [];
+  const now = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+  }
+  return `
+  <div class="space-y-4">
+    <div class="flex flex-wrap gap-2 items-end">
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">Employee</label>
+        <select id="rptEmployee" class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
+          <option value="">Select employee...</option>
+          ${agentShifts.map(s => `<option value="${escHtml(s.employee)}">${escHtml(s.employee)}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 block mb-1">Month</label>
+        <select id="rptMonth" class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none">
+          ${months.map(m => `<option value="${m}">${m}</option>`).join("")}
+        </select>
+      </div>
+      <button onclick="generateReport()" id="btnGenReport" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">Generate Report</button>
+    </div>
+
+    <div id="rptResult"></div>
+
+    ${list.length > 0 ? `
+    <div>
+      <p class="text-xs font-semibold text-gray-500 uppercase mb-2">Saved Reports</p>
+      <div class="space-y-1">
+        ${list.map(r => `<button onclick="viewSavedReport('${escHtml(r.employee)}','${escHtml(r.month)}')"
+          class="w-full text-left flex justify-between items-center px-3 py-2 rounded-lg hover:bg-gray-50 border border-gray-100 text-sm">
+          <span><span class="font-medium">${escHtml(r.employee)}</span> <span class="text-gray-400">${escHtml(r.month)}</span></span>
+          <span class="text-xs text-gray-400">${new Date(r.generated_at).toLocaleDateString()}</span>
+        </button>`).join("")}
+      </div>
+    </div>` : ""}
+  </div>`;
+}
+
+function renderReportsEmployee(list) {
+  if (!list.length) return `<p class="text-gray-400 text-sm text-center py-8">No reports available yet.</p>`;
+  return `<div class="space-y-2">
+    <p class="text-xs text-gray-500 font-semibold uppercase mb-3">Your Reports</p>
+    ${list.map(r => `<button onclick="viewSavedReport('${escHtml(r.employee)}','${escHtml(r.month)}')"
+      class="w-full text-left flex justify-between items-center px-3 py-2 rounded-lg hover:bg-gray-50 border border-gray-100 text-sm">
+      <span class="font-medium">${escHtml(r.month)}</span>
+      <span class="text-xs text-gray-400">${new Date(r.generated_at).toLocaleDateString()}</span>
+    </button>`).join("")}
+  </div>`;
+}
+
+async function generateReport() {
+  const employee = document.getElementById("rptEmployee").value;
+  const month = document.getElementById("rptMonth").value;
+  if (!employee) return showStatus("Select an employee first", "error");
+  const btn = document.getElementById("btnGenReport");
+  btn.disabled = true; btn.textContent = "Generating...";
+  const el = document.getElementById("rptResult");
+  el.innerHTML = `<div class="text-center py-6 text-gray-400"><span class="spinner"></span> Fetching chats & calculating...</div>`;
+  try {
+    const res = await authFetch("/api/reports/generate", { method: "POST", body: JSON.stringify({ employee, month }) });
+    const report = await res.json();
+    if (report.error) { el.innerHTML = `<p class="text-red-500 text-sm">${escHtml(report.error)}</p>`; return; }
+    el.innerHTML = `<div class="border border-gray-200 rounded-xl p-4 mt-2">
+      <div class="flex justify-between items-center mb-4">
+        <div><h3 class="font-bold text-gray-800">${escHtml(employee)}</h3><p class="text-xs text-gray-400">${escHtml(month)}</p></div>
+      </div>
+      ${renderReportView(report)}
+    </div>`;
+  } catch (e) {
+    el.innerHTML = `<p class="text-red-500 text-sm">Error: ${escHtml(e.message)}</p>`;
+  } finally {
+    btn.disabled = false; btn.textContent = "Generate Report";
+  }
+}
+
+async function viewSavedReport(employee, month) {
+  const el = document.getElementById("rptResult") || document.getElementById("reportsContent");
+  const container = document.getElementById("reportsContent");
+  container.innerHTML = `<div class="text-center py-8 text-gray-400"><span class="spinner"></span></div>`;
+  const res = await authFetch(`/api/reports/${encodeURIComponent(employee)}/${encodeURIComponent(month)}`);
+  const report = await res.json();
+  if (report.error) { container.innerHTML = `<p class="text-red-500">${escHtml(report.error)}</p>`; return; }
+  container.innerHTML = `
+    <button onclick="openReports()" class="text-xs text-blue-500 hover:underline mb-4 block">← Back to Reports</button>
+    <div class="mb-4"><h3 class="font-bold text-gray-800 text-lg">${escHtml(employee)}</h3>
+    <p class="text-xs text-gray-400">${escHtml(month)} — Generated ${new Date(report.generated_at).toLocaleString()}</p></div>
+    ${renderReportView(report)}`;
+}
+
+async function saveReportNotes(employee, month) {
+  const notes = document.getElementById("reportNotes").value;
+  await authFetch(`/api/reports/${encodeURIComponent(employee)}/${encodeURIComponent(month)}`, {
+    method: "PATCH", body: JSON.stringify({ admin_notes: notes })
+  });
+  showStatus("Notes saved", "success");
+}

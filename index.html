@@ -31,6 +31,9 @@
         <button id="btnRefreshKb" title="Refresh knowledge base from Google Docs/Sheets" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200 transition flex items-center gap-1">
           <span>⟳</span> <span id="kbStatus">KB</span>
         </button>
+        <button onclick="openReports()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200 transition flex items-center gap-1" title="Monthly Reports">
+          📊 Reports
+        </button>
         <button onclick="openSettings()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200 transition flex items-center gap-1" title="Employee Settings">
           ⚙ Employees
         </button>
@@ -146,6 +149,17 @@
         <button onclick="closeSettings()" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
         <button onclick="saveSettings()" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">Save</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Reports Modal -->
+  <div id="reportsModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+        <h2 class="text-lg font-bold text-gray-800">Monthly Reports</h2>
+        <button onclick="closeReports()" class="text-gray-400 hover:text-gray-600 text-xl px-2">✕</button>
+      </div>
+      <div id="reportsContent" class="overflow-y-auto flex-1 p-6"></div>
     </div>
   </div>
 
