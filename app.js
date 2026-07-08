@@ -51,13 +51,20 @@ document.addEventListener("keydown", e => {
 
 async function checkAuth() {
   const token = getToken();
-  if (!token) return false;
+  if (!token) { document.getElementById("loginModal").classList.remove("hidden"); return false; }
   try {
     const res = await fetch("/api/me", { headers: { "Authorization": `Bearer ${token}` } });
-    if (!res.ok) { localStorage.removeItem("auth_token"); return false; }
+    if (!res.ok) {
+      localStorage.removeItem("auth_token");
+      document.getElementById("loginModal").classList.remove("hidden");
+      return false;
+    }
     currentUser = await res.json();
     return true;
-  } catch { return false; }
+  } catch {
+    document.getElementById("loginModal").classList.remove("hidden");
+    return false;
+  }
 }
 
 function logout() {
