@@ -365,7 +365,9 @@ function buildAgentSegments(events, users, shifts, chatStartedAt) {
   const segments = {};
   const agentUsers = users.filter(u => u.type === "agent");
 
-  // Pre-populate from public events + system_message text/group parsing
+  // Pre-populate: only from agents who actually sent messages OR are named in system_messages.
+  // Do NOT add all group-queue agents — a group transfer just means the chat went to a queue,
+  // only the agent who actually picks it up (sends a message) should be reviewed.
   for (const e of events) {
     const isPrivate = e.visibility === "agents" || e.type === "annotation";
     if (!isPrivate) {
@@ -377,16 +379,10 @@ function buildAgentSegments(events, users, shifts, chatStartedAt) {
     if (e.type === "system_message" && e.text) {
       const lower = e.text.toLowerCase();
       for (const a of agentUsers) {
-        if (!segments[a.id] && lower.includes(a.name.toLowerCase())) {
+        // Only add if the agent is explicitly named (e.g. "assigned to X", "X joined") — not a group transfer
+        const isGroupTransfer = !!extractTransferGroup(e.text);
+        if (!isGroupTransfer && !segments[a.id] && lower.includes(a.name.toLowerCase())) {
           segments[a.id] = { id: a.id, name: a.name, events: [], supervisorNotes: [], responded: false };
-        }
-      }
-      const group = extractTransferGroup(e.text);
-      if (group) {
-        for (const a of groupAgentsOnShift(group, users, shifts, chatStartedAt)) {
-          if (!segments[a.id]) {
-            segments[a.id] = { id: a.id, name: a.name, events: [], supervisorNotes: [], responded: false };
-          }
         }
       }
     }
