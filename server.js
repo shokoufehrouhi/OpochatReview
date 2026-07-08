@@ -1696,6 +1696,17 @@ app.post("/api/reports/generate", authMiddleware, adminOnly, async (req, res) =>
         if (rt >= 0 && rt < 300) { totalFirstResSec += rt; firstResCount++; }
       }
 
+      // Real missed chat: agent was present but sent 0 visible messages while customer had messages
+      const agentKeyFirst = shift.agentKey.split(" ")[0].toLowerCase();
+      const thisAgentUsers = users.filter(u => u.type === "agent" &&
+        (u.name || "").toLowerCase().trim().startsWith(agentKeyFirst));
+      const thisAgentMsgs = events.filter(e =>
+        e.type === "message" && e.visibility !== "agents" &&
+        thisAgentUsers.some(u => u.id === e.author_id));
+      if (custMsgs.length > 0 && thisAgentUsers.length > 0 && thisAgentMsgs.length === 0) {
+        missedChats++;
+      }
+
       // Find review
       const reviewKey = thread.id || chat.id;
       const review = reviews[reviewKey];
@@ -1707,12 +1718,10 @@ app.post("/api/reports/generate", authMiddleware, adminOnly, async (req, res) =>
       let ar = review;
       if (review.per_agent_reviews) {
         const pr = Object.values(review.per_agent_reviews).find(r =>
-          r && r.agent_name && r.agent_name.toLowerCase().trim().startsWith(shift.agentKey)
+          r && r.agent_name && r.agent_name.toLowerCase().trim().startsWith(agentKeyFirst)
         );
         if (pr) ar = pr;
       }
-
-      if (ar.overall_score === 0) missedChats++;
 
       const scoreMap = { overall: ar.overall_score, response_time: ar.response_time_score, tone: ar.tone_score,
         accuracy: ar.accuracy_score, resolution: ar.resolution_score, compliance: ar.compliance_score,
