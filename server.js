@@ -459,17 +459,13 @@ function allAgentsInThread(events, users, shifts, chatStartedAt) {
     }
     if (e.type === "system_message" && e.text) {
       const lower = e.text.toLowerCase();
-      // Detect agent by name in system_message (e.g. "because Arta hasn't replied")
-      for (const a of agentUsers) {
-        if (!seen[a.id] && lower.includes(a.name.toLowerCase())) {
-          seen[a.id] = { id: a.id, name: a.name };
-        }
-      }
-      // Detect agent by group transfer (e.g. "transferred to KYC")
-      const group = extractTransferGroup(e.text);
-      if (group) {
-        for (const a of groupAgentsOnShift(group, users, shifts, chatStartedAt)) {
-          if (!seen[a.id]) seen[a.id] = { id: a.id, name: a.name };
+      const isGroupTransfer = !!extractTransferGroup(e.text);
+      // Only detect agent by explicit name mention — not group transfers (queue agents didn't handle this chat)
+      if (!isGroupTransfer) {
+        for (const a of agentUsers) {
+          if (!seen[a.id] && lower.includes(a.name.toLowerCase())) {
+            seen[a.id] = { id: a.id, name: a.name };
+          }
         }
       }
     }
