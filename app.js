@@ -579,7 +579,7 @@ async function openModal(chatId, threadId) {
 
   try {
     const qs = threadId ? `?thread_id=${threadId}` : "";
-    const res = await fetch(`/api/chats/${chatId}${qs}`);
+    const res = await authFetch(`/api/chats/${chatId}${qs}`);
     const chat = await res.json();
     if (chat.error) throw new Error(chat.error);
 
