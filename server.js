@@ -1001,10 +1001,21 @@ app.get("/api/chats/:chatId", authMiddleware, async (req, res) => {
     }
 
     const messages = events
-      .filter((e) => e.text && (e.type === "message" || e.type === "annotation"))
+      .filter((e) => {
+        if (e.type === "filled_form") return Array.isArray(e.fields) && e.fields.length > 0;
+        if (e.type === "system_message") return !!e.text;
+        return e.text && (e.type === "message" || e.type === "annotation");
+      })
       .map((e) => {
         const user = users.find((u) => u.id === e.author_id);
         const isPrivate = e.visibility === "agents" || e.type === "annotation";
+        if (e.type === "filled_form") {
+          const fields = e.fields.map(f => `${f.label || f.id}: ${f.answer?.label ?? f.answer?.value ?? f.answer ?? ""}`).join("\n");
+          return { author_type: "system", author_name: "Pre-Chat Form", content: fields, created_at: e.created_at, is_private: false, segment_agent: null, event_type: "filled_form" };
+        }
+        if (e.type === "system_message") {
+          return { author_type: "system", author_name: "System", content: e.text, created_at: e.created_at, is_private: false, segment_agent: null, event_type: "system_message" };
+        }
         return {
           author_type: isPrivate ? "supervisor" : (user?.type || "unknown"),
           author_name: user?.name || e.author_id,
@@ -1012,6 +1023,7 @@ app.get("/api/chats/:chatId", authMiddleware, async (req, res) => {
           created_at: e.created_at || null,
           is_private: isPrivate,
           segment_agent: isPrivate ? null : (eventSegmentMap[e.created_at] || null),
+          event_type: "message",
         };
       });
 

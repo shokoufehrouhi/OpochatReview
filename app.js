@@ -722,19 +722,34 @@ async function openModal(chatId, threadId) {
       ? (chat.messages || []).filter(m => m.is_private || !m.segment_agent || m.segment_agent.name === modalFilteredAgentName)
       : (chat.messages || []);
 
-    const messages = visibleMessages.map(m => m.is_private ? `
-      <div class="flex justify-center mb-3">
-        <div class="max-w-[90%] rounded-lg px-3 py-2 text-xs bg-orange-50 border border-orange-200 text-orange-700 text-center">
-          <span class="font-semibold">⚠ ${escHtml(m.author_name)} (Supervisor Note):</span> ${escHtml(m.content)}
-        </div>
-      </div>` : `
+    const messages = visibleMessages.map(m => {
+      if (m.is_private) return `
+        <div class="flex justify-center mb-3">
+          <div class="max-w-[90%] rounded-lg px-3 py-2 text-xs bg-orange-50 border border-orange-200 text-orange-700 text-center">
+            <span class="font-semibold">⚠ ${escHtml(m.author_name)} (Supervisor Note):</span> ${escHtml(m.content)}
+          </div>
+        </div>`;
+      if (m.event_type === "filled_form") return `
+        <div class="flex justify-center mb-3">
+          <div class="max-w-[90%] w-full rounded-lg px-3 py-2 text-xs bg-indigo-50 border border-indigo-200 text-indigo-800">
+            <p class="font-semibold mb-1">📋 Pre-Chat Form</p>
+            <pre class="whitespace-pre-wrap font-sans">${escHtml(m.content)}</pre>
+          </div>
+        </div>`;
+      if (m.event_type === "system_message") return `
+        <div class="flex justify-center mb-3">
+          <div class="text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded-full px-3 py-1">
+            ${escHtml(m.content)}
+          </div>
+        </div>`;
+      return `
       <div class="flex ${m.author_type === "agent" ? "justify-end" : "justify-start"} mb-3">
         <div class="max-w-[80%] rounded-xl px-3 py-2 text-sm ${m.author_type === "agent" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-800"}">
           <p class="font-semibold text-xs opacity-70 mb-1">${m.author_name || ""}</p>
           <p class="leading-relaxed">${escHtml(m.content)}</p>
         </div>
-      </div>
-    `).join("") || `<p class="text-gray-400 text-sm text-center">No messages</p>`;
+      </div>`;
+    }).join("") || `<p class="text-gray-400 text-sm text-center">No messages</p>`;
 
     content.innerHTML = `
       <div>
