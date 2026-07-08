@@ -746,17 +746,29 @@ Step 2 — Determine if the question is in scope for this agent's department:
 
   If a customer's actual question does not belong to the agent's department, it is out of scope — regardless of which department the customer selected in the pre-chat form.
 
-PRE-CHAT LANGUAGE RULE:
-  The transcript may begin with a "Pre-Chat Form" block showing the customer's form answers before the chat started. If any field in that form indicates a language preference or selection (e.g. "Language: English", "زبان: English", or the customer typed/selected "English", "Arabic", "Farsi", etc.):
-  - The agent MUST respond in that language from the very first message.
-  - CRITICAL VIOLATION: If the agent responds in a DIFFERENT language than what the customer selected in the pre-chat form, AND the customer clearly does not understand the agent's language (customer shows confusion, repeats themselves, or the conversation is effectively broken), this is one of the MOST SEVERE failures possible:
+LANGUAGE MATCHING RULE — HIGHEST PRIORITY:
+  The agent MUST respond in the same language the customer is communicating in, OR the language the customer selected in the pre-chat form. This rule has NO exceptions and NO conditions.
+
+  Step 1 — Determine the customer's language:
+    a) Check the Pre-Chat Form (if present at the start of transcript). If any field shows a language selection (e.g. "Language: English", "زبان: English", customer wrote "english", "arabic", "farsi", etc.) — that is the customer's chosen language.
+    b) If no pre-chat form or no language field: look at the language of the customer's own messages.
+    c) If customer writes in English → agent must respond in English.
+    d) If customer writes in Arabic → agent must respond in Arabic.
+    e) NEVER assume a customer knows Farsi/Persian unless: (1) the customer explicitly wrote in Farsi, OR (2) the pre-chat form shows Farsi.
+
+  Step 2 — Check what language the agent used.
+
+  Step 3 — If the agent responded in a DIFFERENT language than the customer's determined language (from Step 1):
+    THIS IS THE MOST CRITICAL VIOLATION IN THE ENTIRE REVIEW. Apply ALL of the following:
       • language_score = 1
       • compliance_score = 1
-      • resolution_score = 1 (the customer could not be helped at all due to the language barrier the agent created)
-      • tone_score = 1 (responding in a language the customer cannot understand is fundamentally disrespectful)
-      • overall_score MUST be 1 or 2 — no exceptions. The entire chat failed because the agent chose the wrong language despite explicit customer selection. Do NOT let any other positive factors raise the overall above 2.
-      • Note this violation prominently in language_notes, compliance_notes, resolution_notes, and the issues field.
-  - If the agent's designated languages do not include the language the customer selected, the agent should transfer the chat — same as the LANGUAGE ROUTING RULE below. Failure to transfer in that case = same CRITICAL VIOLATION above.
+      • resolution_score = 1
+      • tone_score = 1
+      • overall_score = 1 — MANDATORY. No other positive factor can raise this. Set overall_score to 1.
+      • In issues: first bullet must be "CRITICAL: Agent responded in [language used] despite customer communicating in / selecting [customer's language]."
+      • Do NOT soften this penalty under any circumstances. Do NOT say "agent was otherwise helpful" as a mitigating factor.
+
+  If the agent's designated languages do not include the customer's language, the ONLY correct action is to inform the customer and transfer the chat. Responding in a third wrong language instead of transferring = same CRITICAL VIOLATION above.
 
 LANGUAGE ROUTING RULE:
   The agent's designated language(s) are specified at the top of the review context (e.g. "AGENT LANGUAGES: This agent is designated to support: English, Arabic").
