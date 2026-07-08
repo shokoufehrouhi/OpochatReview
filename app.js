@@ -115,11 +115,20 @@ function resolveEmployeeFilter() {
   return agent?.id || null;
 }
 
+function agentMatchesShift(agentName, shift) {
+  if (!agentName || !shift) return false;
+  const k = agentName.toLowerCase().trim();
+  return k === shift.agentKey || k.split(" ")[0] === shift.agentKey;
+}
+
 function applyEmployeeHourFilter(list) {
   if (!activeEmployeeShift) return list;
   return list.filter(c => {
     const h = getTehranHour(c.started_at);
-    return h >= activeEmployeeShift.start && h < activeEmployeeShift.end;
+    if (h < activeEmployeeShift.start || h >= activeEmployeeShift.end) return false;
+    // Only show chats where this employee's agent actually responded (is in chat.agents)
+    const chatAgents = c.agents || [];
+    return chatAgents.some(a => agentMatchesShift(a.name, activeEmployeeShift));
   });
 }
 
