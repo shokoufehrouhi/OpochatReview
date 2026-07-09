@@ -1458,7 +1458,7 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
     let isFirst = true;
 
     do {
-      const body = pageId ? { page_id: pageId } : { filters: { from: dateFrom, to: dateTo }, limit: 100 };
+      const body = pageId ? { page_id: pageId } : { filters: { from: dateFrom + "T00:00:00.000000+00:00", to: dateTo + "T23:59:59.999999+00:00" }, limit: 100 };
       const data = await lcPost("list_archives", body);
       const chats = data.chats || [];
       if (isFirst) { totalChats = data.found_chats ?? data.total_chats ?? 0; isFirst = false; }
