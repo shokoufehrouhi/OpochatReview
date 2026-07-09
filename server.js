@@ -622,10 +622,8 @@ function applyLanguagePenalty(review, agentName, violation) {
   return penalized;
 }
 
-function buildLanguageViolationNote(events, users) {
-  // Keep for transcript context hint (not relied on for scoring)
-  const violations = detectLanguageViolations(events, users);
-  if (violations.size === 0) return "";
+function buildLanguageViolationNote(filteredViolations, events) {
+  if (!filteredViolations || filteredViolations.size === 0) return "";
   const prechatLang = detectPrechatLanguage(events);
   return `⚠ SYSTEM NOTE: Pre-Chat Form language = ${prechatLang?.toUpperCase()}. Language mismatch detected for some agents.\n\n`;
 }
@@ -1293,20 +1291,20 @@ app.post("/api/review/:chatId", authMiddleware, async (req, res) => {
         return k === s.agentKey || k === s.employee.toLowerCase() || k.split(" ")[0] === s.agentKey;
       });
       const agentLangs = (shiftEntry?.languages || []).map(l => l.toLowerCase());
+      // If agent has no language list configured → cannot determine capability → do NOT penalize
+      if (agentLangs.length === 0) continue;
       const custLang = violation.prechatLang; // e.g. "farsi", "arabic", "english"
-      const agentCanSpeak =
-        agentLangs.length === 0 || // no list = assume all
-        agentLangs.some(l => l.includes(custLang) || custLang.includes(l) ||
-          (custLang === "farsi_or_arabic" && (l.includes("farsi") || l.includes("arabic") || l.includes("persian"))) ||
-          (custLang === "farsi" && (l.includes("farsi") || l.includes("persian"))) ||
-          (custLang === "arabic" && l.includes("arabic")) ||
-          (custLang === "english" && l.includes("english"))
-        );
+      const agentCanSpeak = agentLangs.some(l =>
+        (custLang === "farsi"           && (l.includes("farsi") || l.includes("persian"))) ||
+        (custLang === "arabic"          && l.includes("arabic")) ||
+        (custLang === "english"         && l.includes("english")) ||
+        (custLang === "farsi_or_arabic" && (l.includes("farsi") || l.includes("persian") || l.includes("arabic")))
+      );
       if (agentCanSpeak) {
         langViolations.set(agentNameKey, violation);
       }
     }
-    const langViolationNote = buildLanguageViolationNote(events, users);
+    const langViolationNote = buildLanguageViolationNote(langViolations, events);
     const transcript = langViolationNote + buildTranscript(events, users);
     const supervisorNotes = extractSupervisorNotes(events, users);
     const agentSegments = buildAgentSegments(events, users, shifts3, chatStartedAt3);
