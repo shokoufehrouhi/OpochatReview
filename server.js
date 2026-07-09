@@ -1473,10 +1473,12 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
         const users  = c.users || [];
         const events = thread.events || [];
 
-        // Count total chats for every agent mapped in shifts (active employees only)
-        const agentUsers = users.filter(u => u.type === "agent");
-        for (const a of agentUsers) {
-          const n = toEmp(a.name);
+        // Count total chats for every agent mapped in shifts — deduplicate by ID
+        const seenIds = new Set();
+        for (const u of users) {
+          if (u.type !== "agent" || seenIds.has(u.id)) continue;
+          seenIds.add(u.id);
+          const n = toEmp(u.name);
           if (!n) continue;
           if (!emp[n]) emp[n] = { total: 0, reviewed: 0, scores: [], resolved: 0 };
           emp[n].total++;
