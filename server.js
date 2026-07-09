@@ -1472,7 +1472,16 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
         const users  = c.users || [];
         const events = thread.events || [];
 
-        // Primary agent: assignee → first agent who sent any event
+        // Count total chats for EVERY agent who participated (matches Chat Review per-employee count)
+        const agentUsers = users.filter(u => u.type === "agent");
+        for (const a of agentUsers) {
+          const n = toEmp(a.name);
+          if (!n) continue;
+          if (!emp[n]) emp[n] = { total: 0, reviewed: 0, scores: [], resolved: 0 };
+          emp[n].total++;
+        }
+
+        // Review/score attribution: primary agent only (assignee → first agent sender)
         const assigneeId = thread?.assignee?.id;
         const firstAgentId = events.find(e => users.find(u => u.id === e.author_id && u.type === "agent"))?.author_id;
         const agent = (assigneeId ? users.find(u => u.id === assigneeId) : null)
@@ -1482,7 +1491,6 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
         const name = toEmp(agent.name);
         if (!name) continue;
         if (!emp[name]) emp[name] = { total: 0, reviewed: 0, scores: [], resolved: 0 };
-        emp[name].total++;
 
         const rv = reviews[thread.id] || reviews[c.id];
         if (!rv || rv.skipped) continue;
