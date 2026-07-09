@@ -859,6 +859,7 @@ function closeModal() {
 
 // ── Stats & Chart ─────────────────────────────────────────────────────────────
 function updateStats() {
+  if (document.getElementById("page-chats")?.classList.contains("hidden")) return;
   const filtered = applyEmployeeHourFilter(allChats);
   const reviewed = filtered.filter(c => c.review && !c.review.skipped);
   const scores = reviewed.map(c => c.review.overall_score).filter(Boolean);
@@ -891,6 +892,7 @@ function getEmployeeNameForChart(agentName, dateStr) {
 }
 
 function updateChart() {
+  if (document.getElementById("page-chats")?.classList.contains("hidden")) return;
   const byEmployee = {};
   const filtered = applyEmployeeHourFilter(allChats);
   const filteredAgentName = activeEmployeeShift ? getAgentForShift(activeEmployeeShift)?.name || null : null;
@@ -1057,6 +1059,7 @@ async function loadDashboard() {
     ["statTotal","statReviewed","statAvg","statResolved"].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = "—";
     });
+    if (agentChart) { agentChart.destroy(); agentChart = null; }
     showStatus("Dashboard error: " + e.message, "error");
   }
 }
