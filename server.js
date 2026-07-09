@@ -1763,8 +1763,9 @@ app.post("/api/reports/generate", authMiddleware, adminOnly, async (req, res) =>
         weekData[weekLabel].sum += ar.overall_score; weekData[weekLabel].cnt++;
       }
 
-      // Collect notes for summary
-      if (ar.notes) allNotes.push(ar.notes);
+      // Collect notes for summary analysis
+      const noteParts = [ar.summary, ar.issues, ar.strengths].filter(Boolean);
+      if (noteParts.length > 0) allNotes.push(noteParts.join(" | "));
     }
 
     const avgScores = Object.fromEntries(scoreFields.map(f => [f, cnts[f] > 0 ? +(sums[f]/cnts[f]).toFixed(2) : null]));
