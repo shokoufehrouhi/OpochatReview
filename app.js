@@ -1388,7 +1388,12 @@ function renderReportsAdmin(list) {
 }
 
 function renderReportsEmployee(list) {
-  if (!list.length) return `<p class="text-gray-400 text-sm text-center py-8">No reports available yet.</p>`;
+  if (!list.length) return `
+    <div class="flex flex-col items-center justify-center py-20 text-center">
+      <div class="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center text-3xl mb-4">📋</div>
+      <p class="text-gray-700 font-semibold text-base mb-1">No reports yet</p>
+      <p class="text-gray-400 text-sm max-w-xs">Your monthly performance reports will appear here once your manager generates them.</p>
+    </div>`;
   return `<div class="space-y-2">
     <p class="text-xs text-gray-500 font-semibold uppercase mb-3">Your Reports</p>
     ${list.map(r => `<button onclick="viewSavedReport('${escHtml(r.employee)}','${escHtml(r.month)}')"
