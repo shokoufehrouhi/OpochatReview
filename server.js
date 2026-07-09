@@ -961,6 +961,16 @@ RESPONSE TIME SCORING:
 - A long conversation with fast per-message replies = HIGH response time score. Do NOT penalize for total conversation length.
 - NEVER say an agent "handled late" or "took too long" based on total conversation time — only base this on per-reply gaps.
 
+REGULATORY RESTRICTION RULE — CUSTOMER SATISFACTION:
+If a customer is dissatisfied because the agent correctly applied a regulatory or policy restriction — for example:
+  - Transfers from Iranian exchanges (sarafi irani) are not accepted due to broker/regulatory policy
+  - A service or feature is unavailable in the customer's country due to legal restrictions
+  - A deposit/withdrawal method is blocked for compliance reasons
+In these cases: the customer's frustration is caused by the restriction itself, NOT by the agent's handling. If the agent correctly informed the customer of the restriction, was polite, and offered any available alternatives:
+  - Do NOT deduct from satisfaction_score for the customer being unhappy about the restriction.
+  - satisfaction_score must reflect the QUALITY of the agent's communication, not the customer's emotional reaction to a policy they cannot change.
+  - If the agent communicated the restriction clearly and professionally, satisfaction_score should be 8–10.
+
 CHAT MANAGEMENT RULES (check these in compliance scoring):
 1. Follow-up check: After the agent sends a response and the customer does NOT write anything for ~60 seconds (visible as a long gap before the next customer message, or the chat ends without the customer responding), the agent SHOULD send a follow-up such as "سوال دیگه‌ای دارید؟" or "آیا مشکل دیگه‌ای هست؟". If the agent skips this and closes without asking, flag it as a minor compliance issue.
 2. Chat closing: At the end of the conversation the agent must send a proper closing message — either the standard closing macro OR a message explaining the chat is being closed due to customer inactivity. If the agent closes abruptly without a farewell or closing reason, flag it as a compliance issue.
