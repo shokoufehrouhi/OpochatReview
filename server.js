@@ -1761,6 +1761,62 @@ app.post("/api/reports/generate", authMiddleware, adminOnly, async (req, res) =>
 
     const avgScores = Object.fromEntries(scoreFields.map(f => [f, cnts[f] > 0 ? +(sums[f]/cnts[f]).toFixed(2) : null]));
 
+    const scoreTrend = Object.entries(weekData).sort(([a],[b]) => a.localeCompare(b))
+      .map(([label, d]) => ({ label, avg: d.cnt > 0 ? +(d.sum/d.cnt).toFixed(2) : null, count: d.cnt }));
+
+    // Claude analysis: strengths, weaknesses, progress narrative
+    let strengths = [], weaknesses = [], progress_narrative = "";
+    if (allNotes.length > 0) {
+      try {
+        const notesText = allNotes.slice(0, 40).map((n, i) => `Chat ${i+1}: ${n}`).join("\n\n");
+        const trendText = scoreTrend.map(w => `${w.label}: avg ${w.avg ?? "n/a"} (${w.count} chats)`).join(", ");
+        const analysisPrompt = `You are analyzing AI-generated review notes for a customer support agent named "${employee}" for the period ${month}.
+
+Weekly score trend: ${trendText || "not available"}
+
+Review notes from ${allNotes.length} chat sessions:
+${notesText}
+
+Analyze these notes and respond ONLY with a valid JSON object in this exact format:
+{
+  "strengths": ["specific strength 1", "specific strength 2", "specific strength 3"],
+  "weaknesses": ["specific area for improvement 1", "specific area for improvement 2", "specific area for improvement 3"],
+  "progress_narrative": "2-3 sentences describing the agent's performance trend and development over this period based on the notes."
+}
+
+- strengths: 3-5 concrete recurring positive behaviors observed across chats
+- weaknesses: 3-5 concrete recurring issues that need improvement
+- progress_narrative: describe whether performance improved, declined, or stayed stable, and any notable patterns
+- Be specific, not generic. Reference actual issues seen in the notes.`;
+
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": process.env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 1000,
+            system: "You are a JSON-only output assistant. Respond with a single valid JSON object, nothing else.",
+            messages: [{ role: "user", content: analysisPrompt }],
+          }),
+        });
+        const data = await res.json();
+        const raw = data?.content?.[0]?.text || "";
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          strengths  = Array.isArray(parsed.strengths)  ? parsed.strengths  : [];
+          weaknesses = Array.isArray(parsed.weaknesses) ? parsed.weaknesses : [];
+          progress_narrative = parsed.progress_narrative || "";
+        }
+      } catch (e) {
+        console.error("[report] analysis error:", e.message);
+      }
+    }
+
     const report = {
       employee, agent_key: shift.agentKey, month,
       generated_at: new Date().toISOString(),
@@ -1772,13 +1828,13 @@ app.post("/api/reports/generate", authMiddleware, adminOnly, async (req, res) =>
       resolved_count: resolvedCount,
       resolved_rate: reviewedChats > 0 ? Math.round(resolvedCount/reviewedChats*100) : 0,
       avg_scores: avgScores,
-      score_trend: Object.entries(weekData).sort(([a],[b]) => a.localeCompare(b))
-        .map(([label, d]) => ({ label, avg: d.cnt > 0 ? +(d.sum/d.cnt).toFixed(2) : null, count: d.cnt })),
+      score_trend: scoreTrend,
       avg_chat_duration_sec: durCount > 0 ? Math.round(totalDurSec/durCount) : null,
       avg_first_response_sec: firstResCount > 0 ? Math.round(totalFirstResSec/firstResCount) : null,
       review_notes: allNotes,
-      top_issues: [],
-      top_strengths: [],
+      strengths,
+      weaknesses,
+      progress_narrative,
       admin_notes: "",
     };
 

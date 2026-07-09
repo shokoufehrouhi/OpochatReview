@@ -1341,12 +1341,30 @@ function renderReportView(r) {
       <div class="flex gap-6 justify-around">${trend}</div>
     </div>` : ""}
 
-    ${r.review_notes?.length ? `<div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
-      <p class="text-xs font-semibold text-gray-500 uppercase mb-3">Review Notes (${r.review_notes.length})</p>
-      <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
-        ${r.review_notes.map((n,i) => `<div class="text-xs text-gray-600 border-l-2 border-gray-300 pl-2">${escHtml(n)}</div>`).join("")}
-      </div>
+    ${r.progress_narrative ? `<div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+      <p class="text-xs font-semibold text-indigo-600 uppercase mb-2">Progress & Trend</p>
+      <p class="text-sm text-indigo-800 leading-relaxed">${escHtml(r.progress_narrative)}</p>
     </div>` : ""}
+
+    <div class="grid grid-cols-2 gap-4">
+      ${r.strengths?.length ? `<div class="bg-green-50 border border-green-100 rounded-xl p-4">
+        <p class="text-xs font-semibold text-green-700 uppercase mb-2">Strengths</p>
+        <ul class="space-y-1.5">${r.strengths.map(s => `<li class="text-xs text-green-800 flex gap-1.5"><span class="text-green-500 shrink-0">✓</span>${escHtml(s)}</li>`).join("")}</ul>
+      </div>` : ""}
+      ${r.weaknesses?.length ? `<div class="bg-red-50 border border-red-100 rounded-xl p-4">
+        <p class="text-xs font-semibold text-red-600 uppercase mb-2">Areas for Improvement</p>
+        <ul class="space-y-1.5">${r.weaknesses.map(w => `<li class="text-xs text-red-800 flex gap-1.5"><span class="text-red-400 shrink-0">✗</span>${escHtml(w)}</li>`).join("")}</ul>
+      </div>` : ""}
+    </div>
+
+    ${r.review_notes?.length ? `<details class="bg-gray-50 border border-gray-200 rounded-xl">
+      <summary class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase cursor-pointer">
+        Raw Review Notes (${r.review_notes.length})
+      </summary>
+      <div class="px-4 pb-4 space-y-2 max-h-48 overflow-y-auto">
+        ${r.review_notes.map(n => `<div class="text-xs text-gray-600 border-l-2 border-gray-300 pl-2 pt-2">${escHtml(n)}</div>`).join("")}
+      </div>
+    </details>` : ""}
 
     <div class="bg-blue-50 border border-blue-100 rounded-xl p-4">
       <p class="text-xs font-semibold text-blue-600 uppercase mb-2">Admin Notes</p>
@@ -1644,9 +1662,19 @@ function downloadReportPdf() {
       </div>
     </div>` : ""}
 
-    ${r.review_notes?.length ? `<div class="sec" style="margin-top:10px">
-      <div class="sec-title">Review Notes (${r.review_notes.length})</div>
-      <ul>${r.review_notes.slice(0,8).map(n => `<li style="color:#374151;margin-bottom:4px">${escHtml(n)}</li>`).join("")}</ul>
+    ${r.progress_narrative ? `<div class="sec" style="margin-top:10px">
+      <div class="sec-title">Progress & Trend</div>
+      <p style="font-size:10px;color:#3730a3;background:#eef2ff;padding:8px 10px;border-radius:6px;line-height:1.5">${escHtml(r.progress_narrative)}</p>
+    </div>` : ""}
+
+    ${r.strengths?.length ? `<div class="sec" style="margin-top:10px">
+      <div class="sec-title">Strengths</div>
+      <ul>${r.strengths.map(s=>`<li style="color:#15803d">✓ ${escHtml(s)}</li>`).join("")}</ul>
+    </div>` : ""}
+
+    ${r.weaknesses?.length ? `<div class="sec" style="margin-top:10px">
+      <div class="sec-title">Areas for Improvement</div>
+      <ul>${r.weaknesses.map(w=>`<li style="color:#b91c1c">✗ ${escHtml(w)}</li>`).join("")}</ul>
     </div>` : ""}
 
     ${r.admin_notes ? `<div class="sec" style="margin-top:10px">
