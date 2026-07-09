@@ -1474,10 +1474,20 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
         const users  = c.users || [];
         const events = thread.events || [];
 
-        // Count total chats per employee — deduplicate so each employee counted once per chat
+        // Only count agents who actually sent events in THIS thread
+        // (c.users includes historical agents from all past threads — too broad)
+        const assigneeId = thread?.assignee?.id;
+        const threadAgentIds = new Set();
+        if (assigneeId) threadAgentIds.add(assigneeId);
+        for (const e of events) {
+          const u = users.find(u => u.id === e.author_id && u.type === "agent");
+          if (u) threadAgentIds.add(u.id);
+        }
+
         const countedEmps = new Set();
-        for (const u of users) {
-          if (u.type !== "agent") continue;
+        for (const agentId of threadAgentIds) {
+          const u = users.find(u => u.id === agentId);
+          if (!u) continue;
           const n = toEmp(u.name);
           if (!n || countedEmps.has(n)) continue;
           countedEmps.add(n);
@@ -1485,8 +1495,7 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
           emp[n].total++;
         }
 
-        // Review/score attribution: primary agent only (must be mapped in shifts)
-        const assigneeId = thread?.assignee?.id;
+        // Review/score attribution: primary agent only (assignee → first event sender)
         const firstAgentId = events.find(e => users.find(u => u.id === e.author_id && u.type === "agent"))?.author_id;
         const agent = (assigneeId ? users.find(u => u.id === assigneeId) : null)
                    || (firstAgentId ? users.find(u => u.id === firstAgentId) : null);
