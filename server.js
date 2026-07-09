@@ -975,6 +975,7 @@ DO NOT deduct from satisfaction_score when:
   - The customer is unhappy because the agent correctly applied a restriction or policy (e.g. no transfers from Iranian exchanges, a blocked deposit method, a country restriction, a compliance rule).
   - The customer did not receive the answer they wanted, but the agent's answer was correct and complete.
   - The outcome was outside the agent's control (regulatory, technical, or policy limitation).
+  - The agent explained the steps clearly but the customer did not follow through, did not cooperate, or stopped responding before completing the process. The incomplete outcome is the customer's responsibility, not the agent's.
 
 In all of these cases: if the agent handled it correctly and communicated clearly → satisfaction_score = 8–10.
 Only deduct from satisfaction_score if the agent made an error, was unclear, was rude, or failed to do something they could have done.
