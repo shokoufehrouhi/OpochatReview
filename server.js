@@ -750,7 +750,6 @@ function getTehranHourFromIso(iso) {
 
 function allAgentsInThread(events, users, shifts, chatStartedAt) {
   const seen = {};
-  const reasons = {};
   const agentUsers = users.filter(u => u.type === "agent");
   for (const e of events) {
     const isPrivate = e.visibility === "agents" || e.type === "annotation";
@@ -758,7 +757,6 @@ function allAgentsInThread(events, users, shifts, chatStartedAt) {
       const user = users.find(u => u.id === e.author_id);
       if (user?.type === "agent" && !seen[user.id]) {
         seen[user.id] = { id: user.id, name: user.name };
-        reasons[user.name] = `sent message (type=${e.type})`;
       }
     }
     if (e.type === "system_message" && e.text) {
@@ -768,15 +766,12 @@ function allAgentsInThread(events, users, shifts, chatStartedAt) {
         for (const a of agentUsers) {
           if (!seen[a.id] && lower.includes(a.name.toLowerCase())) {
             seen[a.id] = { id: a.id, name: a.name };
-            reasons[a.name] = `named in system_message: "${e.text.slice(0,80)}"`;
           }
         }
       }
     }
   }
-  const result = Object.values(seen);
-  if (result.length) console.log(`[allAgents] found: ${result.map(a => `${a.name}(${reasons[a.name]})`).join(' | ')}`);
-  return result;
+  return Object.values(seen);
 }
 
 async function reviewWithClaude(transcript, chatId, chatStartedAt, supervisorNotes = [], agentName = null, agentLanguages = [], agentGroups = [], attempt = 1) {
@@ -1474,7 +1469,6 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
         }
       }
     }
-    console.log("[dashboard] agentKeyToEmail:", JSON.stringify(agentKeyToEmail));
 
     // Use Istanbul UTC+3 to match frontend getTehranHour("Europe/Istanbul")
     function getIstHour(chatTime) {
@@ -1511,8 +1505,6 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
       const isShared = uniqueEmpsForKey.length > 1;
 
       let pid = null;
-      let dbgRaw = 0, dbgNoAgent = 0, dbgNoShift = 0;
-      const dbgHours = {};
       do {
         const body = pid
           ? { page_id: pid }
@@ -1526,38 +1518,27 @@ app.get("/api/dashboard-stats", authMiddleware, async (req, res) => {
           const events = thread.events || [];
           const chatTime = thread.created_at || null;
           const istHour = getIstHour(chatTime);
-          dbgRaw++;
-          dbgHours[Math.floor(istHour)] = (dbgHours[Math.floor(istHour)] || 0) + 1;
 
-          // allAgentsInThread: same function used by /api/chats → same as Chat Review's chatAgents
           const chatAgents = allAgentsInThread(events, users, shifts, chatTime);
-          // agentMatchesShift equivalent: does this agentKey appear in chatAgents?
           const agentInChat = chatAgents.some(a => {
             const n = (a.name || "").toLowerCase().trim();
             return n === key || n.split(" ")[0] === key;
           });
-          if (!agentInChat) { dbgNoAgent++; continue; }
+          if (!agentInChat) continue;
 
           if (isShared) {
-            // Split by hour to determine which employee
             const matched = shiftList.find(s => istHour >= s.start && istHour < s.end);
-            if (!matched) { dbgNoShift++; }
             const empName = (matched || shiftList[0]).employee;
             emp[empName].total++;
           } else {
-            // Single employee: apply shift-hour filter (Chat Review's applyEmployeeHourFilter)
             const inShift = shiftList.some(s => istHour >= s.start && istHour < s.end);
-            if (!inShift) { dbgNoShift++; continue; }
+            if (!inShift) continue;
             emp[uniqueEmpsForKey[0]].total++;
           }
         }
       } while (pid);
-
-      console.log(`[dashboard] ${key}: raw=${dbgRaw} noAgent=${dbgNoAgent} noShift=${dbgNoShift} hours=${JSON.stringify(dbgHours)}`);
-      uniqueEmpsForKey.forEach(n => console.log(`[dashboard] ${n}: ${emp[n]?.total ?? 0}`));
     }
 
-    console.log("[dashboard] employee totals:", Object.entries(emp).map(([n,d])=>`${n}:${d.total}`).join(", "));
 
     // Scores/reviews from database filtered by month
     for (const rv of Object.values(reviews)) {
