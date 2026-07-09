@@ -94,20 +94,16 @@ async function initApp() {
   document.getElementById("dateFrom").value = localDateStr(firstOfMonth);
   document.getElementById("dateTo").value = localDateStr(today);
 
-  // Show logout button and hide settings if not admin
-  const header = document.querySelector("header .flex.flex-wrap.items-center");
-  if (header) {
-    const logoutBtn = document.createElement("button");
-    logoutBtn.textContent = `${currentUser.username} ↩`;
-    logoutBtn.title = "Logout";
-    logoutBtn.className = "text-xs text-gray-400 hover:text-red-500 px-2 py-1";
-    logoutBtn.onclick = logout;
-    header.appendChild(logoutBtn);
+  // Sidebar user info
+  const sidebar = document.getElementById("sidebarUserInfo");
+  if (sidebar) {
+    sidebar.classList.remove("hidden");
+    document.getElementById("sidebarUsername").textContent = currentUser.username;
+    document.getElementById("sidebarRole").textContent = currentUser.role;
   }
-  // Hide employee settings button for non-admin
-  if (currentUser.role !== "admin") {
-    const empBtn = document.querySelector("button[onclick='openSettings()']");
-    if (empBtn) empBtn.style.display = "none";
+  // Show admin-only items
+  if (currentUser.role === "admin") {
+    document.querySelectorAll(".admin-only").forEach(el => el.classList.remove("hidden"));
   }
 
   await loadAgents();
@@ -124,6 +120,30 @@ async function initApp() {
   document.getElementById("modal").addEventListener("click", (e) => {
     if (e.target === document.getElementById("modal")) closeModal();
   });
+
+  // Default page
+  showPage("chats");
+}
+
+// ── Page navigation ───────────────────────────────────────────────────────────
+function showPage(name) {
+  const pages = ["dashboard", "chats", "reports", "employees"];
+  pages.forEach(p => {
+    document.getElementById(`page-${p}`)?.classList.add("hidden");
+    const btn = document.getElementById(`nav-${p}`);
+    if (btn) {
+      btn.classList.remove("bg-slate-700", "text-white");
+      btn.classList.add("text-slate-300");
+    }
+  });
+  document.getElementById(`page-${name}`)?.classList.remove("hidden");
+  const activeBtn = document.getElementById(`nav-${name}`);
+  if (activeBtn) {
+    activeBtn.classList.add("bg-slate-700", "text-white");
+    activeBtn.classList.remove("text-slate-300");
+  }
+  if (name === "reports") openReports();
+  if (name === "employees") openSettings();
 }
 
 // ── Knowledge Base ───────────────────────────────────────────────────────────
@@ -1028,7 +1048,6 @@ function showStatus(msg, type) {
 let settingsAgents = [];
 
 async function openSettings() {
-  document.getElementById("settingsModal").classList.remove("hidden");
   if (agents.length > 0) settingsAgents = agents;
   try {
     const [shiftsRes, usersRes] = await Promise.all([
@@ -1047,9 +1066,7 @@ async function openSettings() {
   renderShiftsTable();
 }
 
-function closeSettings() {
-  document.getElementById("settingsModal").classList.add("hidden");
-}
+function closeSettings() { /* page-based, no modal to close */ }
 
 async function refreshSettingsAgents() {
   const icon = document.getElementById("settingsAgentRefreshIcon");
@@ -1186,7 +1203,6 @@ async function saveSettings() {
     if (data.ok) {
       agentShifts = newShifts;
       showStatus("Saved", "success");
-      closeSettings();
       renderTable();
     } else {
       showStatus("Save failed: " + (data.error || "unknown"), "error");
@@ -1198,12 +1214,9 @@ async function saveSettings() {
 
 // ── Reports ───────────────────────────────────────────────────────────────────
 
-function closeReports() {
-  document.getElementById("reportsModal").classList.add("hidden");
-}
+function closeReports() { /* page-based */ }
 
 async function openReports() {
-  document.getElementById("reportsModal").classList.remove("hidden");
   const el = document.getElementById("reportsContent");
   el.innerHTML = `<div class="text-center text-gray-400 py-8"><span class="spinner"></span></div>`;
 
@@ -1391,7 +1404,6 @@ async function generateReport() {
 }
 
 async function viewSavedReport(employee, month) {
-  const el = document.getElementById("rptResult") || document.getElementById("reportsContent");
   const container = document.getElementById("reportsContent");
   container.innerHTML = `<div class="text-center py-8 text-gray-400"><span class="spinner"></span></div>`;
   const res = await authFetch(`/api/reports/${encodeURIComponent(employee)}/${encodeURIComponent(month)}`);
