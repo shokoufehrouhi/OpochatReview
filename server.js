@@ -623,6 +623,34 @@ function detectLanguageViolations(events, users) {
   return violations;
 }
 
+// Detects when an agent abandoned the chat: customer sent a message and agent never replied.
+// Returns { idleMinutes, lastCustomerText } if abandoned, or null.
+function detectAgentAbandonment(events, users) {
+  const pubMsgs = events
+    .filter(e => e.type === "message" && e.visibility !== "agents" && e.text && e.created_at)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  if (pubMsgs.length === 0) return null;
+
+  const lastMsg = pubMsgs[pubMsgs.length - 1];
+  const lastAuthor = users.find(u => u.id === lastMsg.author_id);
+  if (lastAuthor?.type !== "customer") return null; // last msg was from agent — not abandoned
+
+  // Check that an agent DID respond at some point (otherwise LOST CHAT RULE handles it)
+  const hadAgentReply = pubMsgs.some(e => users.find(u => u.id === e.author_id)?.type === "agent");
+  if (!hadAgentReply) return null;
+
+  // Time from customer's last message to the last event in the chat (proxy for chat end)
+  const lastEventTime = Math.max(...events.filter(e => e.created_at).map(e => new Date(e.created_at).getTime()));
+  const lastCustomerTime = new Date(lastMsg.created_at).getTime();
+  const idleMinutes = (lastEventTime - lastCustomerTime) / 60000;
+
+  if (idleMinutes >= 2) {
+    return { idleMinutes: Math.round(idleMinutes * 10) / 10, lastCustomerText: lastMsg.text?.slice(0, 100) };
+  }
+  return null;
+}
+
 function applyLanguagePenalty(review, agentName, violation) {
   const penalized = {
     ...review,
@@ -1006,7 +1034,13 @@ Only deduct from satisfaction_score if the agent made an error, was unclear, was
 CHAT MANAGEMENT RULES (check these in compliance scoring):
 1. Follow-up check: After the agent sends a response and the customer does NOT write anything for ~60 seconds (visible as a long gap before the next customer message, or the chat ends without the customer responding), the agent SHOULD send a follow-up such as "سوال دیگه‌ای دارید؟" or "آیا مشکل دیگه‌ای هست؟". If the agent skips this and closes without asking, flag it as a minor compliance issue.
 2. Chat closing: At the end of the conversation the agent must send a proper closing message — either the standard closing macro OR a message explaining the chat is being closed due to customer inactivity. If the agent closes abruptly without a farewell or closing reason, flag it as a compliance issue.
-3. IDLE PENALTY: If you see a system message containing "Chat is idle due to" or "inactivity" in the transcript, this means the agent left the chat unattended. Maximum allowed idle time is 2 minutes. Any idle event = deduct 2 points from compliance_score (this is a significant violation — do not treat it as minor). Mention it explicitly in compliance_notes.
+3. ABANDONED / IDLE CHAT: If the transcript contains a SYSTEM NOTE saying "AGENT ABANDONED CHAT", OR a system message containing "idle due to inactivity" or "Chat is idle":
+   - The AGENT left the customer waiting beyond the 2-minute maximum. This is a serious failure.
+   - response_time_score: 1–3 (agent did not respond — severe violation)
+   - compliance_score: deduct at least 3 points (critical — abandoning a chat is not minor)
+   - resolution_score: deduct (chat was not resolved — agent left)
+   - Do NOT apply CUSTOMER NO-RESPONSE RULE here — it is the AGENT who went silent, not the customer.
+   - Mention the abandonment explicitly in response_time_notes, compliance_notes, and resolution_notes.
 4. These other rules are MINOR issues — deduct at most 1 point from compliance per missing item. Do not heavily penalize if the conversation was otherwise resolved well.
 overall_score = weighted avg: accuracy 20%, resolution 20%, compliance 15%, tone 15%, response_time 15%, product_knowledge 10%, satisfaction 3%, language 2%
 
@@ -1346,7 +1380,11 @@ app.post("/api/review/:chatId", authMiddleware, async (req, res) => {
       }
     }
     const langViolationNote = buildLanguageViolationNote(langViolations, events);
-    const transcript = langViolationNote + buildTranscript(events, users);
+    const abandonmentInfo = detectAgentAbandonment(events, users);
+    const abandonmentNote = abandonmentInfo
+      ? `⚠ SYSTEM NOTE: AGENT ABANDONED CHAT — Customer's last message was left unanswered for ${abandonmentInfo.idleMinutes} minutes (max allowed: 2 min). Unanswered: "${abandonmentInfo.lastCustomerText}". Apply ABANDONED CHAT penalties.\n\n`
+      : "";
+    const transcript = langViolationNote + abandonmentNote + buildTranscript(events, users);
     const supervisorNotes = extractSupervisorNotes(events, users);
     const agentSegments = buildAgentSegments(events, users, shifts3, chatStartedAt3);
     const agentCount = Object.keys(agentSegments).length;
