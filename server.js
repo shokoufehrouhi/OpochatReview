@@ -793,24 +793,12 @@ function getTehranHourFromIso(iso) {
 
 function allAgentsInThread(events, users, shifts, chatStartedAt) {
   const seen = {};
-  const agentUsers = users.filter(u => u.type === "agent");
   for (const e of events) {
     const isPrivate = e.visibility === "agents" || e.type === "annotation";
-    if (!isPrivate) {
+    if (!isPrivate && e.type === "message") {
       const user = users.find(u => u.id === e.author_id);
       if (user?.type === "agent" && !seen[user.id]) {
         seen[user.id] = { id: user.id, name: user.name };
-      }
-    }
-    if (e.type === "system_message" && e.text) {
-      const lower = e.text.toLowerCase();
-      const isGroupTransfer = !!extractTransferGroup(e.text);
-      if (!isGroupTransfer) {
-        for (const a of agentUsers) {
-          if (!seen[a.id] && lower.includes(a.name.toLowerCase())) {
-            seen[a.id] = { id: a.id, name: a.name };
-          }
-        }
       }
     }
   }
