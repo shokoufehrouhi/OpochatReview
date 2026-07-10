@@ -535,6 +535,24 @@ function detectPrechatLanguage(events) {
   return null;
 }
 
+// Like detectPrechatLanguage but also falls back to customer's actual messages
+// when no prechat form was submitted.
+function detectCustomerLanguage(events, users) {
+  const fromForm = detectPrechatLanguage(events);
+  if (fromForm) return fromForm;
+
+  const custMsgs = events
+    .filter(e => e.type === "message" && e.visibility !== "agents" && e.text
+      && users.find(u => u.id === e.author_id)?.type === "customer")
+    .slice(0, 5)
+    .map(e => e.text)
+    .join(" ");
+  const detected = detectTextLanguage(custMsgs);
+  if (detected === "farsi_or_arabic") return "farsi_or_arabic";
+  if (detected === "latin") return "english";
+  return null;
+}
+
 function detectTextLanguage(text) {
   if (!text) return null;
   const arabicFarsiChars = (text.match(/[؀-ۿ]/g) || []).length;
@@ -548,7 +566,7 @@ function detectTextLanguage(text) {
 
 function detectLanguageViolations(events, users) {
   // Returns: Map of agentName -> { prechatLang, agentUsedLang } for violating agents
-  const prechatLang = detectPrechatLanguage(events);
+  const prechatLang = detectCustomerLanguage(events, users);
   if (!prechatLang) return new Map();
 
   // If the customer themselves sent messages in a DIFFERENT language than pre-chat,
@@ -1345,7 +1363,7 @@ app.post("/api/review/:chatId", authMiddleware, async (req, res) => {
     // Proactive check: if an agent's language list does NOT include the customer's language,
     // they MUST transfer regardless — add to cannotSpeak even if no violation was detected
     // (e.g. agent transferred silently and detectLanguageViolations never flagged them)
-    const custLangGlobal = detectPrechatLanguage(events);
+    const custLangGlobal = detectCustomerLanguage(events, users);
     if (custLangGlobal) {
       for (const [, seg] of Object.entries(agentSegments)) {
         const nk = seg.name.toLowerCase().trim();
