@@ -268,9 +268,15 @@ app.delete("/api/app-users/:username", authMiddleware, adminOnly, async (req, re
 
 app.post("/api/change-password", authMiddleware, async (req, res) => {
   try {
-    const { new_password } = req.body || {};
-    if (!new_password || new_password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    const { current_password, new_password } = req.body || {};
+    if (!current_password) return res.status(400).json({ error: "Current password is required" });
+    if (!new_password || new_password.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
     const username = req.user.username;
+    const r = await pool.query("SELECT * FROM app_users WHERE username=$1", [username]);
+    const user = r.rows[0];
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (hashPass(current_password, user.salt) !== user.password_hash)
+      return res.status(401).json({ error: "Current password is incorrect" });
     const salt = crypto.randomBytes(16).toString("hex");
     const hash = hashPass(new_password, salt);
     await pool.query(

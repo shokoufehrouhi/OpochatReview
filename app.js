@@ -44,7 +44,7 @@ async function doLogin() {
     currentUser = { username: data.username, role: data.role };
     document.getElementById("loginModal").classList.add("hidden");
     if (data.must_change_password) {
-      document.getElementById("changePasswordModal").classList.remove("hidden");
+      openChangePassword(true);
     } else {
       initApp();
     }
@@ -55,13 +55,37 @@ async function doLogin() {
   }
 }
 
+let _pwChangeForced = false;
+
+function openChangePassword(forced = false) {
+  _pwChangeForced = forced;
+  const modal = document.getElementById("changePasswordModal");
+  document.getElementById("currentPassword").value = "";
+  document.getElementById("newPassword").value = "";
+  document.getElementById("confirmPassword").value = "";
+  document.getElementById("changePwError").classList.add("hidden");
+  document.getElementById("changePwSuccess").classList.add("hidden");
+  document.getElementById("changePwSubtitle").textContent = forced
+    ? "Your password was reset by admin. Set a new password to continue."
+    : "Enter your current password then choose a new one.";
+  document.getElementById("btnClosePwModal").classList.toggle("hidden", forced);
+  modal.classList.remove("hidden");
+}
+
+function closeChangePassword() {
+  if (_pwChangeForced) return;
+  document.getElementById("changePasswordModal").classList.add("hidden");
+}
+
 async function doChangePassword() {
+  const currentPw = document.getElementById("currentPassword").value;
   const newPw = document.getElementById("newPassword").value;
   const confirmPw = document.getElementById("confirmPassword").value;
   const errEl = document.getElementById("changePwError");
   const okEl = document.getElementById("changePwSuccess");
   errEl.classList.add("hidden"); okEl.classList.add("hidden");
-  if (newPw.length < 6) { errEl.textContent = "Password must be at least 6 characters"; errEl.classList.remove("hidden"); return; }
+  if (!currentPw) { errEl.textContent = "Enter your current password"; errEl.classList.remove("hidden"); return; }
+  if (newPw.length < 6) { errEl.textContent = "New password must be at least 6 characters"; errEl.classList.remove("hidden"); return; }
   if (newPw !== confirmPw) { errEl.textContent = "Passwords do not match"; errEl.classList.remove("hidden"); return; }
   const btn = document.getElementById("btnChangePassword");
   btn.disabled = true; btn.textContent = "Saving…";
@@ -69,21 +93,19 @@ async function doChangePassword() {
     const res = await fetch("/api/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${getToken()}` },
-      body: JSON.stringify({ new_password: newPw })
+      body: JSON.stringify({ current_password: currentPw, new_password: newPw })
     });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || "Failed"; errEl.classList.remove("hidden"); return; }
     okEl.classList.remove("hidden");
     setTimeout(() => {
       document.getElementById("changePasswordModal").classList.add("hidden");
-      document.getElementById("newPassword").value = "";
-      document.getElementById("confirmPassword").value = "";
-      initApp();
+      if (_pwChangeForced) initApp();
     }, 1200);
   } catch (e) {
     errEl.textContent = "Connection error"; errEl.classList.remove("hidden");
   } finally {
-    btn.disabled = false; btn.textContent = "Set Password";
+    btn.disabled = false; btn.textContent = "Update Password";
   }
 }
 
