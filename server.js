@@ -1339,89 +1339,72 @@ app.post("/api/review/:chatId", authMiddleware, async (req, res) => {
     }
 
     const chatStartedAt = thread.created_at || null;
-
-    // Overall review + per-agent reviews in parallel
-    const overallPromise = reviewWithClaude(transcript, chatId, chatStartedAt, supervisorNotes);
-    const agentPromises = agentCount > 1
-      ? Object.fromEntries(
-          Object.entries(agentSegments).map(([agentId, seg]) => {
-            // Agent was assigned but never sent a message — instant 0, no Claude call needed
-            if (!seg.responded) {
-              const result = Promise.resolve({
-                agent_name: seg.name,
-                overall_score: 0,
-                response_time_score: 0,
-                accuracy_score: 0,
-                tone_score: 0,
-                resolution_score: 0,
-                notes: `${seg.name} hich javabi be customer naferestade va chat ro az dast dad.`,
-                issues: ["Chat az dast raft — agent hich pasokhi naferestade"],
-                suggested_tags: [],
-              });
-              return [agentId, result];
-            }
-            // Prepend pre-chat form + system_messages from full event list so Claude has routing context
-            const contextEvents = events.filter(e =>
-              e.type === "filled_form" || e.type === "system_message"
-            );
-            const agentOnlyEvents = seg.events.filter(e =>
-              e.type !== "filled_form" && e.type !== "system_message"
-            );
-            const agentTranscript = buildTranscript([...contextEvents, ...agentOnlyEvents], users);
-            // Find this agent's shift entry for languages + groups
-            const agentShiftEntry = shifts3.find(s => {
-              const k = seg.name.toLowerCase().trim();
-              return k === s.agentKey || k.split(" ")[0] === s.agentKey;
-            });
-            const agentLangs = agentShiftEntry?.languages || [];
-            const agentGroups = agentShiftEntry?.groups || [];
-            return [
-              agentId,
-              reviewWithClaude(agentTranscript, chatId, chatStartedAt, seg.supervisorNotes || [], seg.name, agentLangs, agentGroups)
-                .then(r => ({ ...r, agent_name: seg.name }))
-                .catch(err => {
-                  console.error(`[per-agent review] FAILED for ${seg.name}:`, err?.message || err);
-                  return {
-                    agent_name: seg.name,
-                    overall_score: null,
-                    notes: `Review failed: ${err?.message || "unknown error"}`,
-                    issues: [],
-                    suggested_tags: [],
-                    _error: true,
-                  };
-                })
-            ];
-          })
-        )
-      : {};
-
-    let review = await overallPromise;
-    review.reviewed_at = new Date().toISOString();
-
-    // Server-side language penalty override — do not rely on Claude to apply it
     console.log(`[lang] prechatLang=${detectPrechatLanguage(events)} violations=${[...langViolations.entries()].map(([k,v])=>`${k}:${v.prechatLang}->${v.agentLang}`).join(',') || 'none'} agentCount=${agentCount}`);
-    // Agents who were in raw violations but filtered out = they can't speak customer's language → transfer was correct
     const langCannotSpeak = new Set([...langViolationsRaw.keys()].filter(k => !langViolations.has(k)));
 
-    if (agentCount > 1) {
+    let review;
+
+    if (agentCount <= 1) {
+      // Single-agent: one overall Claude call
+      review = await reviewWithClaude(transcript, chatId, chatStartedAt, supervisorNotes);
+      if (langViolations.size > 0) {
+        const [firstKey, firstV] = [...langViolations.entries()][0];
+        review = applyLanguagePenalty(review, firstKey, firstV);
+        console.log(`[lang] single-agent penalty applied`);
+      }
+    } else {
+      // Multi-agent: per-agent Claude calls only — no overall call, saves 1 token spend per chat
+      const agentPromises = Object.fromEntries(
+        Object.entries(agentSegments).map(([agentId, seg]) => {
+          if (!seg.responded) {
+            return [agentId, Promise.resolve({
+              agent_name: seg.name,
+              overall_score: 0,
+              response_time_score: 0,
+              accuracy_score: 0,
+              tone_score: 0,
+              resolution_score: 0,
+              compliance_score: 0,
+              product_knowledge_score: 0,
+              satisfaction_score: 0,
+              language_score: 0,
+              issues: ["Chat az dast raft — agent hich pasokhi naferestade"],
+              suggested_tags: [],
+              resolved: false,
+            })];
+          }
+          const contextEvents = events.filter(e => e.type === "filled_form" || e.type === "system_message");
+          const agentOnlyEvents = seg.events.filter(e => e.type !== "filled_form" && e.type !== "system_message");
+          const agentTranscript = buildTranscript([...contextEvents, ...agentOnlyEvents], users);
+          const agentShiftEntry = shifts3.find(s => {
+            const k = seg.name.toLowerCase().trim();
+            return k === s.agentKey || k.split(" ")[0] === s.agentKey;
+          });
+          const agentLangs = agentShiftEntry?.languages || [];
+          const agentGroups = agentShiftEntry?.groups || [];
+          return [
+            agentId,
+            reviewWithClaude(agentTranscript, chatId, chatStartedAt, seg.supervisorNotes || [], seg.name, agentLangs, agentGroups)
+              .then(r => ({ ...r, agent_name: seg.name }))
+              .catch(err => {
+                console.error(`[per-agent review] FAILED for ${seg.name}:`, err?.message || err);
+                return { agent_name: seg.name, overall_score: null, issues: [], suggested_tags: [], _error: true };
+              })
+          ];
+        })
+      );
+
       const perAgent = {};
       for (const [agentId, promise] of Object.entries(agentPromises)) {
         let ar = await promise;
         const nameKey = (ar.agent_name || "").toLowerCase();
-        // Check if agent cannot speak customer's language (filtered out from violations)
         const cannotSpeak = langCannotSpeak.has(nameKey) ||
           [...langCannotSpeak].some(k => nameKey.startsWith(k) || k.startsWith(nameKey.split(" ")[0]));
         if (cannotSpeak) {
-          // Agent correctly transferred — override ALL scores to 10, only keep response_time
           ar = {
             ...ar,
-            accuracy_score: 10,
-            resolution_score: 10,
-            compliance_score: 10,
-            product_knowledge_score: 10,
-            satisfaction_score: 10,
-            language_score: 10,
-            tone_score: 10,
+            accuracy_score: 10, resolution_score: 10, compliance_score: 10,
+            product_knowledge_score: 10, satisfaction_score: 10, language_score: 10, tone_score: 10,
             overall_score: Math.max(ar.overall_score || 0, 8),
             accuracy_notes: "Agent correctly transferred chat — cannot evaluate content in unsupported language.",
             resolution_notes: "Transfer to correct department is the complete resolution.",
@@ -1429,27 +1412,41 @@ app.post("/api/review/:chatId", authMiddleware, async (req, res) => {
             product_knowledge_notes: "Cannot evaluate — agent does not support customer's language.",
             satisfaction_notes: "Agent did the only thing they could do — transfer was correct.",
             language_notes: "Agent correctly identified language barrier and transferred.",
-            tone_notes: ar.tone_notes,
-            issues: null,
-            _lang_transfer_override: true,
+            issues: null, _lang_transfer_override: true,
           };
           console.log(`[lang] transfer override applied to ${ar.agent_name}`);
         } else {
-          // Check if violation exists (agent CAN speak language but didn't)
           const v = langViolations.get(nameKey) || [...langViolations.entries()].find(([k]) => nameKey.startsWith(k) || k.startsWith(nameKey.split(" ")[0]))?.[1];
           if (v) { ar = applyLanguagePenalty(ar, ar.agent_name, v); console.log(`[lang] penalty applied to ${ar.agent_name}`); }
         }
         perAgent[agentId] = ar;
       }
-      review.per_agent_reviews = perAgent;
-    } else {
-      // Single-agent: if ANY violation detected, apply to overall review
-      if (langViolations.size > 0) {
-        const [firstKey, firstV] = [...langViolations.entries()][0];
-        review = applyLanguagePenalty(review, firstKey, firstV);
-        console.log(`[lang] single-agent penalty applied, prechat=${firstV.prechatLang} agentLang=${firstV.agentLang}`);
-      }
+
+      // Build overall review from per-agent averages — no separate Claude call needed
+      const validScores = Object.values(perAgent).map(r => r.overall_score).filter(s => s != null && s > 0);
+      const avgOverall = validScores.length ? +(validScores.reduce((a,b) => a+b, 0) / validScores.length).toFixed(1) : null;
+      const allResolved = Object.values(perAgent).some(r => r.resolved);
+      const allTags = [...new Set(Object.values(perAgent).flatMap(r => r.suggested_tags || []))];
+      const allIssues = Object.values(perAgent).flatMap(r => {
+        if (!r.issues) return [];
+        return Array.isArray(r.issues) ? r.issues : [r.issues];
+      }).slice(0, 3);
+
+      review = {
+        overall_score: avgOverall,
+        resolved: allResolved,
+        escalated: Object.values(perAgent).some(r => r.escalated),
+        language_detected: Object.values(perAgent)[0]?.language_detected || null,
+        supervisor_warning: Object.values(perAgent).some(r => r.supervisor_warning),
+        supervisor_warning_text: Object.values(perAgent).find(r => r.supervisor_warning_text)?.supervisor_warning_text || null,
+        suggested_tags: allTags,
+        issues: allIssues.length ? allIssues : null,
+        summary: `Multi-agent chat (${Object.values(perAgent).map(r => r.agent_name).join(", ")}). Avg score: ${avgOverall ?? "N/A"}.`,
+        per_agent_reviews: perAgent,
+      };
     }
+
+    review.reviewed_at = new Date().toISOString();
 
     // Enrich review with agent + date metadata for dashboard queries
     const assigneeId2 = thread?.assignee?.id;
