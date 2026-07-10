@@ -150,6 +150,7 @@ if (process.env.DATABASE_URL) {
       // Migrate legacy 'employee' role to 'user'
       await pool.query(`UPDATE app_users SET role='user' WHERE role='employee'`);
       await pool.query(`ALTER TABLE app_users ALTER COLUMN role SET DEFAULT 'user'`);
+      await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false`);
       // Seed admin if not exists
       const exists = await pool.query("SELECT id FROM app_users WHERE username='admin'");
       if (exists.rows.length === 0) {
@@ -205,7 +206,7 @@ app.post("/api/login", async (req, res) => {
     const hash = hashPass(password, user.salt);
     if (hash !== user.password_hash) return res.status(401).json({ error: "Invalid username or password" });
     const token = await createSession({ username: user.username, role: user.role, employee_name: user.employee_name });
-    res.json({ token, role: user.role, username: user.username });
+    res.json({ token, role: user.role, username: user.username, must_change_password: !!user.must_change_password });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -237,9 +238,9 @@ app.post("/api/app-users", authMiddleware, adminOnly, async (req, res) => {
     const salt = crypto.randomBytes(16).toString("hex");
     const hash = hashPass(password, salt);
     await pool.query(
-      `INSERT INTO app_users (username, password_hash, salt, role, employee_name)
-       VALUES ($1,$2,$3,'user',$4)
-       ON CONFLICT (username) DO UPDATE SET password_hash=$2, salt=$3, employee_name=$4`,
+      `INSERT INTO app_users (username, password_hash, salt, role, employee_name, must_change_password)
+       VALUES ($1,$2,$3,'user',$4,true)
+       ON CONFLICT (username) DO UPDATE SET password_hash=$2, salt=$3, employee_name=$4, must_change_password=true`,
       [username, hash, salt, employee_name || null]
     );
     res.json({ ok: true });
@@ -261,6 +262,21 @@ app.delete("/api/app-users/:username", authMiddleware, adminOnly, async (req, re
   try {
     if (req.params.username === "admin") return res.status(400).json({ error: "Cannot delete admin" });
     await pool.query("DELETE FROM app_users WHERE username=$1", [req.params.username]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/change-password", authMiddleware, async (req, res) => {
+  try {
+    const { new_password } = req.body || {};
+    if (!new_password || new_password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    const username = req.user.username;
+    const salt = crypto.randomBytes(16).toString("hex");
+    const hash = hashPass(new_password, salt);
+    await pool.query(
+      "UPDATE app_users SET password_hash=$1, salt=$2, must_change_password=false WHERE username=$3",
+      [hash, salt, username]
+    );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

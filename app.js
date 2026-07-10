@@ -43,7 +43,11 @@ async function doLogin() {
     localStorage.setItem("auth_token", data.token);
     currentUser = { username: data.username, role: data.role };
     document.getElementById("loginModal").classList.add("hidden");
-    initApp();
+    if (data.must_change_password) {
+      document.getElementById("changePasswordModal").classList.remove("hidden");
+    } else {
+      initApp();
+    }
   } catch (e) {
     errEl.textContent = "Connection error"; errEl.classList.remove("hidden");
   } finally {
@@ -51,8 +55,41 @@ async function doLogin() {
   }
 }
 
+async function doChangePassword() {
+  const newPw = document.getElementById("newPassword").value;
+  const confirmPw = document.getElementById("confirmPassword").value;
+  const errEl = document.getElementById("changePwError");
+  const okEl = document.getElementById("changePwSuccess");
+  errEl.classList.add("hidden"); okEl.classList.add("hidden");
+  if (newPw.length < 6) { errEl.textContent = "Password must be at least 6 characters"; errEl.classList.remove("hidden"); return; }
+  if (newPw !== confirmPw) { errEl.textContent = "Passwords do not match"; errEl.classList.remove("hidden"); return; }
+  const btn = document.getElementById("btnChangePassword");
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const res = await fetch("/api/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${getToken()}` },
+      body: JSON.stringify({ new_password: newPw })
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || "Failed"; errEl.classList.remove("hidden"); return; }
+    okEl.classList.remove("hidden");
+    setTimeout(() => {
+      document.getElementById("changePasswordModal").classList.add("hidden");
+      document.getElementById("newPassword").value = "";
+      document.getElementById("confirmPassword").value = "";
+      initApp();
+    }, 1200);
+  } catch (e) {
+    errEl.textContent = "Connection error"; errEl.classList.remove("hidden");
+  } finally {
+    btn.disabled = false; btn.textContent = "Set Password";
+  }
+}
+
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && !document.getElementById("loginModal").classList.contains("hidden")) doLogin();
+  if (e.key === "Enter" && !document.getElementById("changePasswordModal").classList.contains("hidden")) doChangePassword();
 });
 
 async function checkAuth() {
