@@ -636,19 +636,22 @@ function detectAgentAbandonment(events, users) {
   const lastAuthor = users.find(u => u.id === lastMsg.author_id);
   if (lastAuthor?.type !== "customer") return null; // last msg was from agent — not abandoned
 
-  // Check that an agent DID respond at some point (otherwise LOST CHAT RULE handles it)
-  const hadAgentReply = pubMsgs.some(e => users.find(u => u.id === e.author_id)?.type === "agent");
-  if (!hadAgentReply) return null;
+  // Find last agent message that came BEFORE the customer's final unanswered message
+  const agentMsgsBefore = pubMsgs.filter(e => {
+    const u = users.find(u2 => u2.id === e.author_id);
+    return u?.type === "agent" && new Date(e.created_at) < new Date(lastMsg.created_at);
+  });
+  if (agentMsgsBefore.length === 0) return null; // LOST CHAT RULE handles zero-reply agents
 
-  // Time from customer's last message to the last event in the chat (proxy for chat end)
-  const lastEventTime = Math.max(...events.filter(e => e.created_at).map(e => new Date(e.created_at).getTime()));
-  const lastCustomerTime = new Date(lastMsg.created_at).getTime();
-  const idleMinutes = (lastEventTime - lastCustomerTime) / 60000;
+  const lastAgentMsg = agentMsgsBefore[agentMsgsBefore.length - 1];
+  // Measure how long the customer was waiting since the agent's last response
+  const waitMinutes = (new Date(lastMsg.created_at) - new Date(lastAgentMsg.created_at)) / 60000;
 
-  if (idleMinutes >= 2) {
-    return { idleMinutes: Math.round(idleMinutes * 10) / 10, lastCustomerText: lastMsg.text?.slice(0, 100) };
+  if (waitMinutes >= 2) {
+    return { idleMinutes: Math.round(waitMinutes * 10) / 10, lastCustomerText: lastMsg.text?.slice(0, 100) };
   }
-  return null;
+  // Even if wait < 2 min, if the chat simply ended with unanswered customer message, flag it
+  return { idleMinutes: Math.round(waitMinutes * 10) / 10, lastCustomerText: lastMsg.text?.slice(0, 100), shortWait: true };
 }
 
 function applyLanguagePenalty(review, agentName, violation) {
@@ -1381,7 +1384,8 @@ app.post("/api/review/:chatId", authMiddleware, async (req, res) => {
     }
     const langViolationNote = buildLanguageViolationNote(langViolations, events);
     const abandonmentInfo = detectAgentAbandonment(events, users);
-    const abandonmentNote = abandonmentInfo
+    console.log(`[abandon] detected=${!!abandonmentInfo} idleMin=${abandonmentInfo?.idleMinutes} shortWait=${abandonmentInfo?.shortWait}`);
+    const abandonmentNote = abandonmentInfo && !abandonmentInfo.shortWait
       ? `⚠ SYSTEM NOTE: AGENT ABANDONED CHAT — Customer's last message was left unanswered for ${abandonmentInfo.idleMinutes} minutes (max allowed: 2 min). Unanswered: "${abandonmentInfo.lastCustomerText}". Apply ABANDONED CHAT penalties.\n\n`
       : "";
     const transcript = langViolationNote + abandonmentNote + buildTranscript(events, users);
@@ -1468,7 +1472,7 @@ app.post("/api/review/:chatId", authMiddleware, async (req, res) => {
           }
           const contextEvents = events.filter(e => e.type === "filled_form" || e.type === "system_message");
           const agentOnlyEvents = seg.events.filter(e => e.type !== "filled_form" && e.type !== "system_message");
-          const agentTranscript = buildTranscript([...contextEvents, ...agentOnlyEvents], users);
+          const agentTranscript = abandonmentNote + buildTranscript([...contextEvents, ...agentOnlyEvents], users);
           const agentShiftEntry = shifts3.find(s => {
             const k = seg.name.toLowerCase().trim();
             return k === s.agentKey || k.split(" ")[0] === s.agentKey;
