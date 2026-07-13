@@ -200,7 +200,7 @@ app.post("/api/login", async (req, res) => {
     const { username, password } = req.body || {};
     if (!username || !password) return res.status(400).json({ error: "Missing credentials" });
     if (!pool) return res.status(503).json({ error: "DB not available" });
-    const r = await pool.query("SELECT * FROM app_users WHERE username=$1", [username]);
+    const r = await pool.query("SELECT * FROM app_users WHERE LOWER(username)=LOWER($1)", [username]);
     const user = r.rows[0];
     if (!user) return res.status(401).json({ error: "Invalid username or password" });
     const hash = hashPass(password, user.salt);

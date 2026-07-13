@@ -481,7 +481,7 @@ async function loadChats(pageId) {
 function setStatsLoading(on) {
   ["statTotal","statReviewed","statAvg","statResolved"].forEach(id => {
     const el = document.getElementById(id);
-    if (on) el.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin align-middle"></span>`;
+    if (on && el) el.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin align-middle"></span>`;
   });
 }
 
@@ -654,9 +654,11 @@ async function reviewChat(chatId, threadId, btn) {
     const review = await res.json();
     if (review.error) throw new Error(review.error);
 
-    // Update chat in local state
+    // Update chat in local state (both paginated slice and full list)
     const chat = chats.find(c => (c.thread_id || c.id) === rowKey);
     if (chat) chat.review = review;
+    const allChat = allChats.find(c => (c.thread_id || c.id) === rowKey);
+    if (allChat) allChat.review = review;
 
     const scoreEl = document.getElementById("score-" + rowKey);
     const statusEl = document.getElementById("status-" + rowKey);
@@ -715,8 +717,8 @@ async function reviewAllVisible() {
 
   do {
     const params = new URLSearchParams();
-    if (from) params.set("date_from", from + "T00:00:00.000000+00:00");
-    if (to)   params.set("date_to",   to   + "T23:59:59.999999+00:00");
+    if (from) params.set("date_from", iranDayToUtc(from, false));
+    if (to)   params.set("date_to",   iranDayToUtc(to, true));
     if (agentId) params.set("agent_id", agentId);
     if (pageId)  params.set("page_id", pageId);
 
@@ -993,18 +995,22 @@ async function openModal(chatId, threadId) {
   }
 }
 
-async function reviewChatModal(chatId) {
+async function reviewChatModal(chatId, threadId) {
   document.getElementById("modalContent").innerHTML = `<div class="p-10 text-center text-gray-400"><span class="spinner"></span> Reviewing with AI...</div>`;
   try {
-    const res = await authFetch(`/api/review/${chatId}`, { method: "POST" });
+    const qs = threadId ? `?thread_id=${threadId}` : "";
+    const res = await authFetch(`/api/review/${chatId}${qs}`, { method: "POST" });
     const review = await res.json();
     if (review.error) throw new Error(review.error);
-    const chat = chats.find(c => c.id === chatId);
+    const rowKey = threadId || chatId;
+    const chat = chats.find(c => (c.thread_id || c.id) === rowKey);
     if (chat) chat.review = review;
+    const allChat = allChats.find(c => (c.thread_id || c.id) === rowKey);
+    if (allChat) allChat.review = review;
     renderTable();
     updateStats();
     updateChart();
-    await openModal(chatId);
+    await openModal(chatId, threadId);
   } catch (e) {
     document.getElementById("modalContent").innerHTML = `<div class="p-10 text-center text-red-400">Error: ${e.message}</div>`;
   }
@@ -1063,10 +1069,11 @@ function updateChart() {
   }
 
   for (const chat of filtered) {
-    if (!chat.agent) continue;
+    const primaryAgent = chat.agent || chat.agents?.[0] || null;
+    if (!primaryAgent) continue;
     const emp = activeEmployeeShift
       ? activeEmployeeShift.employee
-      : getEmployeeNameForChart(chat.agent.name, chat.started_at);
+      : getEmployeeNameForChart(primaryAgent.name, chat.started_at);
 
     if (!activeEmployeeShift) {
       totalByEmployee[emp] = (totalByEmployee[emp] || 0) + 1;
@@ -1173,6 +1180,7 @@ async function loadDashboard() {
 
     // Chart
     setChartLoading(false);
+    if (agentChart) { agentChart.destroy(); agentChart = null; }
     const ctx = document.getElementById("agentChart").getContext("2d");
     const emps = d.employees;
     const labels = emps.map(e => e.name);
@@ -1236,10 +1244,6 @@ async function loadDashboard() {
 function scorePill(score) {
   const cls = score >= 7 ? "score-high" : score >= 5 ? "score-mid" : "score-low";
   return `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold ${cls}">${score.toFixed(1)}</span>`;
-}
-
-function scoreColor(score) {
-  return score >= 7 ? "text-green-600" : score >= 5 ? "text-yellow-500" : "text-red-500";
 }
 
 function scoreBar(label, value, notes) {
@@ -1495,6 +1499,7 @@ async function saveSettings() {
     if (data.ok) {
       agentShifts = newShifts;
       showStatus("Saved", "success");
+      renderAgentFilter();
       renderTable();
     } else {
       showStatus("Save failed: " + (data.error || "unknown"), "error");
