@@ -1205,6 +1205,23 @@ ${transcript}`;
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
+app.get("/api/debug-cw-reviews", authMiddleware, adminOnly, async (req, res) => {
+  const reviews = await loadReviews();
+  const cw = Object.entries(reviews)
+    .filter(([k]) => k.startsWith("cw:"))
+    .map(([k, v]) => ({
+      key: k,
+      _employee: v?._employee,
+      _agent_name: v?._agent_name,
+      _agent_id: v?._agent_id,
+      _chat_date: v?._chat_date,
+      _platform: v?._platform,
+      skipped: v?.skipped,
+      overall_score: v?.overall_score,
+    }));
+  res.json({ total_cw_reviews: cw.length, reviews: cw });
+});
+
 app.get("/api/debug-chat/:chatId", authMiddleware, adminOnly, async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -2656,6 +2673,68 @@ app.post("/api/reports/generate", authMiddleware, adminOnly, async (req, res) =>
       // Collect notes for summary analysis
       const noteParts = [ar.summary, ar.issues, ar.strengths].filter(Boolean);
       if (noteParts.length > 0) allNotes.push(noteParts.join(" | "));
+    }
+
+    // Chatwoot reviewed chats for this employee
+    // Reviews store _employee (matched employee name), _chat_date, _platform — no conv fetch needed
+    if (chatwootEnabled() && shift.chatwootAgentId) {
+      const cwAgentId  = shift.chatwootAgentId.toLowerCase().trim();
+      const cwPrefix   = cwAgentId.split("@")[0]; // "arad" from "arad@opofinance.com"
+      const empLow     = employee.toLowerCase().trim();
+      const fromMs     = new Date(dateFrom).getTime();
+      const toMs       = new Date(dateTo).getTime();
+
+      for (const [key, review] of Object.entries(reviews)) {
+        if (!key.startsWith("cw:")) continue;
+        if (!review) continue;
+
+        // Match this review to the employee:
+        // 1. _employee field set at review time (most reliable)
+        // 2. _agent_name first-word / email-prefix match (fallback)
+        const rEmployee = (review._employee    || "").toLowerCase().trim();
+        const rName     = (review._agent_name  || "").toLowerCase().trim();
+        const rFirst    = rName.split(" ")[0];
+        const isMatch   = rEmployee === empLow ||
+                          rName === cwAgentId  || rName === cwPrefix ||
+                          rFirst === cwPrefix  || cwPrefix === rFirst;
+        if (!isMatch) continue;
+
+        // Date range filter using _chat_date stored in the review
+        const chatDate = review._chat_date || null;
+        const chatMs   = chatDate ? new Date(chatDate).getTime() : 0;
+        if (!chatMs || chatMs < fromMs || chatMs > toMs) continue;
+
+        totalChats++;
+
+        // Shift hour filter
+        const h = getTehranHourFromIso(chatDate);
+        if (h < shift.start || h >= shift.end) continue;
+        chatsInShift++;
+
+        if (review.skipped) continue;
+        reviewedChats++;
+        if (review.resolved) resolvedCount++;
+
+        const scoreMap = {
+          overall: review.overall_score, response_time: review.response_time_score,
+          tone: review.tone_score, accuracy: review.accuracy_score,
+          resolution: review.resolution_score, compliance: review.compliance_score,
+          product_knowledge: review.product_knowledge_score,
+          satisfaction: review.satisfaction_score, language: review.language_score,
+        };
+        for (const [k, v] of Object.entries(scoreMap)) {
+          if (v != null && v > 0) { sums[k] += v; cnts[k]++; }
+        }
+
+        const dayOfMonth = new Date(chatDate).getDate();
+        const weekLabel  = `Week ${Math.ceil(dayOfMonth / 7)}`;
+        if (!weekData[weekLabel]) weekData[weekLabel] = { sum: 0, cnt: 0 };
+        if (review.overall_score != null && review.overall_score > 0) {
+          weekData[weekLabel].sum += review.overall_score; weekData[weekLabel].cnt++;
+        }
+        const noteParts = [review.summary, review.issues, review.strengths].filter(Boolean);
+        if (noteParts.length > 0) allNotes.push(noteParts.join(" | "));
+      }
     }
 
     const avgScores = Object.fromEntries(scoreFields.map(f => [f, cnts[f] > 0 ? +(sums[f]/cnts[f]).toFixed(2) : null]));
