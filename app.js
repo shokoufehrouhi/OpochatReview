@@ -580,7 +580,9 @@ function getPerAgentReview(review, agentName) {
 // ── Render Table ─────────────────────────────────────────────────────────────
 function renderTable() {
   const tbody = document.getElementById("chatTableBody");
-  const displayChats = applyEmployeeHourFilter(allChats);
+  const platformFilter = document.getElementById("platformFilter")?.value || "";
+  let displayChats = applyEmployeeHourFilter(allChats);
+  if (platformFilter) displayChats = displayChats.filter(c => c.platform === platformFilter);
 
   const countEl = document.getElementById("chatCount");
   if (countEl) {
@@ -767,11 +769,12 @@ async function reviewAllVisible() {
 
   const from = document.getElementById("dateFrom").value;
   const to = document.getElementById("dateTo").value;
+  const activePlatform = document.getElementById("platformFilter")?.value || "";
   // resolveEmployeeFilter sets activeEmployeeShift and returns LiveChat agent ID (or null)
   const agentId = resolveEmployeeFilter();
   const employeeShift = activeEmployeeShift; // snapshot for filtering
 
-  do {
+  if (activePlatform !== "chatwoot") do {
     const params = new URLSearchParams();
     if (from) params.set("date_from", iranDayToUtc(from, false));
     if (to)   params.set("date_to",   iranDayToUtc(to, true));
@@ -850,7 +853,7 @@ async function reviewAllVisible() {
   } while (pageId);
 
   // Also review Chatwoot chats already loaded in allChats
-  const cwPending = allChats.filter(c => {
+  const cwPending = activePlatform === "livechat" ? [] : allChats.filter(c => {
     if (c.platform !== "chatwoot") return false;
     if (!c.review) return true;
     if (c.review.skipped) return false;

@@ -123,6 +123,11 @@
             <select id="agentFilter" class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
               <option value="">All Agents</option>
             </select>
+            <select id="platformFilter" onchange="renderTable()" class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
+              <option value="">All Platforms</option>
+              <option value="livechat">LiveChat</option>
+              <option value="chatwoot">Chatwoot</option>
+            </select>
             <button id="btnLoad" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
               Load Chats
             </button>
