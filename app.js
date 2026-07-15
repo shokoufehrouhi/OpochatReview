@@ -197,7 +197,7 @@ async function initApp() {
 }
 
 // ── Page navigation ───────────────────────────────────────────────────────────
-const REPORT_PAGES = ["reports"];
+const REPORT_PAGES = ["reports", "report-monthly"];
 
 function toggleReportsMenu() {
   const submenu = document.getElementById("reports-submenu");
@@ -209,7 +209,7 @@ function toggleReportsMenu() {
 }
 
 function showPage(name) {
-  const pages = ["dashboard", "chats", "reports", "employees", "config"];
+  const pages = ["dashboard", "chats", "reports", "report-monthly", "employees", "config"];
   pages.forEach(p => {
     document.getElementById(`page-${p}`)?.classList.add("hidden");
     const btn = document.getElementById(`nav-${p}`);
@@ -233,6 +233,7 @@ function showPage(name) {
   }
   if (name === "dashboard") loadDashboard();
   if (name === "reports") openReports();
+  if (name === "report-monthly") openMonthlyOverview();
   if (name === "employees") openSettings();
   if (name === "config") loadKnowledgeStatus();
   localStorage.setItem("lastPage", name);
@@ -1749,6 +1750,113 @@ async function saveSettings() {
 function closeReports() { /* page-based */ }
 
 let _activeReport = null;
+
+// ── Monthly Overview ──────────────────────────────────────────────────────────
+
+const _monthlyCharts = {};
+
+function openMonthlyOverview() {
+  const sel = document.getElementById("monthlyYear");
+  if (sel && !sel.options.length) {
+    const cur = new Date().getFullYear();
+    for (let y = cur; y >= cur - 4; y--) {
+      sel.innerHTML += `<option value="${y}">${y}</option>`;
+    }
+  }
+  loadMonthlyOverview();
+}
+
+async function loadMonthlyOverview() {
+  const year = document.getElementById("monthlyYear")?.value || new Date().getFullYear();
+  const content = document.getElementById("monthlyOverviewContent");
+  if (!content) return;
+  content.innerHTML = `<div class="text-center py-16 text-gray-400 text-sm">Loading...</div>`;
+
+  // Destroy old charts
+  Object.values(_monthlyCharts).forEach(c => { try { c.destroy(); } catch (_) {} });
+  Object.keys(_monthlyCharts).forEach(k => delete _monthlyCharts[k]);
+
+  try {
+    const res = await authFetch(`/api/reports/monthly-overview?year=${year}`);
+    const data = await res.json();
+    const months = data.months || {};
+    const now = new Date();
+    const curYearStr = now.getFullYear().toString();
+
+    // All months of the selected year, from current (or Dec) down to Jan
+    const startMonth = (year.toString() === curYearStr) ? now.getMonth() + 1 : 12;
+    const monthKeys = [];
+    for (let m = startMonth; m >= 1; m--) {
+      monthKeys.push(`${year}-${String(m).padStart(2, "0")}`);
+    }
+
+    const hasAny = monthKeys.some(k => months[k]?.length);
+    if (!hasAny) {
+      content.innerHTML = `<div class="text-center py-16 text-gray-400 text-sm">No reviewed chats found for ${year}.</div>`;
+      return;
+    }
+
+    content.innerHTML = monthKeys.map(month => {
+      const emps = months[month] || [];
+      const total = emps.reduce((a, e) => a + e.count, 0);
+      const chartId = `mc_${month.replace("-", "_")}`;
+      return `
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <span class="font-semibold text-gray-800 text-sm">${monthLabel(month)}</span>
+            ${total ? `<span class="text-xs text-gray-400">${total} chats reviewed</span>` : `<span class="text-xs text-gray-300">No data</span>`}
+          </div>
+          <div class="px-4 pb-4 pt-3">
+            ${emps.length
+              ? `<canvas id="${chartId}" height="90"></canvas>`
+              : `<p class="text-center text-gray-300 text-sm py-6">No reviewed chats</p>`}
+          </div>
+        </div>`;
+    }).join("");
+
+    // Render a chart for each month that has data
+    for (const month of monthKeys) {
+      const emps = months[month];
+      if (!emps?.length) continue;
+      const chartId = `mc_${month.replace("-", "_")}`;
+      const canvas = document.getElementById(chartId);
+      if (!canvas) continue;
+      const labels = emps.map(e => e.name);
+      const scores = emps.map(e => e.avg);
+      const counts = emps.map(e => e.count);
+      const colors = scores.map(s => s >= 7 ? "#22c55e" : s >= 5 ? "#eab308" : "#ef4444");
+      _monthlyCharts[month] = new Chart(canvas.getContext("2d"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{ label: "Avg Score", data: scores, backgroundColor: colors, borderRadius: 6 }],
+        },
+        options: {
+          scales: {
+            y: { min: 0, max: 10, grid: { color: "#f1f5f9" }, ticks: { stepSize: 2 } },
+            x: { grid: { display: false } },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `Score: ${ctx.parsed.y.toFixed(1)}  |  ${counts[ctx.dataIndex]} chats`,
+              },
+            },
+            datalabels: {
+              anchor: "end", align: "end", offset: 2,
+              color: "#374151", font: { weight: "bold", size: 11 },
+              formatter: (v) => v.toFixed(1),
+            },
+          },
+        },
+        plugins: [ChartDataLabels],
+      });
+    }
+  } catch (e) {
+    content.innerHTML = `<div class="text-center py-16 text-red-400 text-sm">Error: ${escHtml(e.message)}</div>`;
+  }
+}
 
 async function openReports() {
   const el = document.getElementById("reportsContent");

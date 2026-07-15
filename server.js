@@ -2497,6 +2497,53 @@ async function runNightlyReview() {
 // ── Reports ───────────────────────────────────────────────────────────────────
 
 // Delete all reports (admin only)
+app.get("/api/reports/monthly-overview", authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const year = (req.query.year || new Date().getFullYear()).toString();
+    const [reviews, shifts] = await Promise.all([loadReviews(), loadShifts()]);
+
+    // agent name/key → employee name lookup
+    const agentToEmp = {};
+    for (const s of shifts) {
+      const low = s.agentKey.toLowerCase().trim();
+      agentToEmp[low] = s.employee;
+      agentToEmp[low.split(" ")[0]] = s.employee;
+    }
+
+    const byMonth = {};
+
+    for (const [, review] of Object.entries(reviews)) {
+      if (!review || review.skipped || review.overall_score == null) continue;
+      const chatDate = review._chat_date || null;
+      if (!chatDate) continue;
+      const month = chatDate.slice(0, 7);
+      if (!month.startsWith(year)) continue;
+
+      const employee =
+        review._employee ||
+        agentToEmp[(review._agent_name || "").toLowerCase().trim()] ||
+        agentToEmp[(review._agent_name || "").toLowerCase().trim().split(" ")[0]] ||
+        review._agent_name;
+      if (!employee) continue;
+
+      if (!byMonth[month]) byMonth[month] = {};
+      if (!byMonth[month][employee]) byMonth[month][employee] = { sum: 0, cnt: 0, resolved: 0 };
+      byMonth[month][employee].sum   += review.overall_score;
+      byMonth[month][employee].cnt++;
+      if (review.resolved) byMonth[month][employee].resolved++;
+    }
+
+    const months = {};
+    for (const [month, empData] of Object.entries(byMonth)) {
+      months[month] = Object.entries(empData)
+        .map(([name, d]) => ({ name, avg: +(d.sum / d.cnt).toFixed(2), count: d.cnt, resolved: d.resolved }))
+        .sort((a, b) => b.avg - a.avg);
+    }
+
+    res.json({ year, months });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete("/api/reports", authMiddleware, adminOnly, async (req, res) => {
   try {
     await pool.query("DELETE FROM reports");
