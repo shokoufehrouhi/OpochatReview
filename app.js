@@ -504,29 +504,21 @@ async function loadChats(pageId) {
       document.getElementById("btnReviewAll").classList.remove("hidden");
     }
 
-    // Auto-fetch all remaining pages in background for complete stats
-    if (!pageId && data.next_page_id) {
-      setStatsLoading(true);
-      setChartLoading(true);
-      fetchAllPagesForStats(data.next_page_id, from, to, agentId).finally(() => {
-        setStatsLoading(false);
-        if (!document.getElementById("page-chats")?.classList.contains("hidden")) {
-          setChartLoading(false);
-          updateStats();
-          renderTable();
-          updateChart();
-        }
-      });
+    if (!pageId) {
+      // Wait for all remaining LC pages + CW simultaneously, then hide loading
+      const lcAllPages = data.next_page_id
+        ? fetchAllPagesForStats(data.next_page_id, from, to, agentId)
+        : Promise.resolve();
+
+      setChatsLoading(true, "Loading all chats...");
+      await Promise.all([lcAllPages, fetchChatwootChats(from, to)]);
+
+      updateStats();
+      updateChart();
+      renderTable();
+      setChatsLoading(false);
     } else {
       updateStats();
-      if (!pageId) updateChart();
-    }
-
-    // Fetch Chatwoot chats and wait before hiding loading overlay
-    if (!pageId) {
-      setChatsLoading(true, "Loading Chatwoot chats...");
-      await fetchChatwootChats(from, to);
-      setChatsLoading(false);
     }
   } catch (e) {
     setChatsLoading(false);
