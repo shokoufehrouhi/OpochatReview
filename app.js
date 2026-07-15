@@ -1234,10 +1234,23 @@ function updateChart() {
     totalByEmployee[activeEmployeeShift.employee] = filtered.length;
   }
 
-  // Build set of employees hidden from chart
-  const hiddenFromChart = new Set(
-    agentShifts.filter(s => s.showInChart === false).map(s => s.employee)
-  );
+  // Build sets for employees hidden from chart (by employee name, agentKey, and chatwootAgentId)
+  const hiddenEmployees = new Set();
+  const hiddenAgentKeys = new Set();
+  const hiddenCwIds = new Set();
+  agentShifts.filter(s => s.showInChart === false).forEach(s => {
+    if (s.employee) hiddenEmployees.add(s.employee.toLowerCase());
+    if (s.agentKey) hiddenAgentKeys.add(s.agentKey.toLowerCase());
+    if (s.chatwootAgentId) hiddenCwIds.add(s.chatwootAgentId.toLowerCase().trim());
+  });
+
+  function isHiddenFromChart(emp, agent) {
+    if (hiddenEmployees.has((emp || "").toLowerCase())) return true;
+    if (agent?.id && hiddenAgentKeys.has(String(agent.id).toLowerCase())) return true;
+    if (agent?.email && hiddenCwIds.has(agent.email.toLowerCase().trim())) return true;
+    if (agent?.name && hiddenAgentKeys.has(agent.name.toLowerCase().trim())) return true;
+    return false;
+  }
 
   for (const chat of filtered) {
     const primaryAgent = chat.agent || chat.agents?.[0] || null;
@@ -1246,7 +1259,7 @@ function updateChart() {
       ? activeEmployeeShift.employee
       : getEmployeeNameForChart(primaryAgent.name, chat.started_at, chat.platform, primaryAgent.email);
 
-    if (hiddenFromChart.has(emp)) continue; // skip employees disabled in chart
+    if (isHiddenFromChart(emp, primaryAgent)) continue; // skip employees disabled in chart
 
     if (!activeEmployeeShift) {
       totalByEmployee[emp] = (totalByEmployee[emp] || 0) + 1;
