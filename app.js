@@ -1368,7 +1368,9 @@ async function loadDashboard() {
     setChartLoading(false);
     if (agentChart) { agentChart.destroy(); agentChart = null; }
     const ctx = document.getElementById("agentChart").getContext("2d");
-    const emps = d.employees;
+    // Filter out employees where showInChart === false
+    const hiddenEmpNames = new Set(agentShifts.filter(s => s.showInChart === false).map(s => s.employee.toLowerCase()));
+    const emps = (d.employees || []).filter(e => !hiddenEmpNames.has((e.name || "").toLowerCase()));
     const labels = emps.map(e => e.name);
     const scores = emps.map(e => e.avg_score ?? 0);
     const totals = emps.map(e => e.total ?? 0);
