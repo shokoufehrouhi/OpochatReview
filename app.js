@@ -1800,13 +1800,20 @@ async function loadMonthlyOverview() {
       const emps = months[month] || [];
       const total = emps.reduce((a, e) => a + e.count, 0);
       const chartId = `mc_${month.replace("-", "_")}`;
+      const best = emps[0] || null;
       return `
         <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <span class="font-semibold text-gray-800 text-sm">${monthLabel(month)}</span>
             ${total ? `<span class="text-xs text-gray-400">${total} chats reviewed</span>` : `<span class="text-xs text-gray-300">No data</span>`}
           </div>
-          <div class="px-4 pb-4 pt-3">
+          ${best ? `
+          <div class="px-5 pt-3 pb-1 flex items-center gap-1.5">
+            <span class="text-yellow-400 text-sm">🏆</span>
+            <span class="text-xs font-semibold text-gray-700">${escHtml(best.name)}</span>
+            <span class="text-xs text-gray-400">— ${best.avg.toFixed(1)}</span>
+          </div>` : ""}
+          <div class="px-4 pb-4 pt-1">
             ${emps.length
               ? `<canvas id="${chartId}" height="90"></canvas>`
               : `<p class="text-center text-gray-300 text-sm py-6">No reviewed chats</p>`}
