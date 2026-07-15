@@ -190,8 +190,9 @@ async function initApp() {
 
   // Default page — restore last visited page
   const lastPage = localStorage.getItem("lastPage");
-  const validPages = ["dashboard", "chats", "reports", "employees"];
-  const startPage = validPages.includes(lastPage) && (lastPage !== "employees" || currentUser.role === "admin")
+  const validPages = ["dashboard", "chats", "reports", "report-monthly", "employees", "config"];
+  const adminPages = ["employees", "config"];
+  const startPage = validPages.includes(lastPage) && (!adminPages.includes(lastPage) || currentUser.role === "admin")
     ? lastPage : "chats";
   showPage(startPage);
 }
