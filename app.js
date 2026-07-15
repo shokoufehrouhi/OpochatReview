@@ -934,8 +934,20 @@ async function openModal(chatId, threadId) {
     const lang = { fa: "Persian", en: "English", ar: "Arabic", mixed: "Mixed" };
 
     // Determine if we're in employee-filtered mode
-    const modalFilteredAgent = activeEmployeeShift ? getAgentForShift(activeEmployeeShift) : null;
-    const modalFilteredAgentName = modalFilteredAgent?.name || null;
+    let modalFilteredAgentName = null;
+    if (activeEmployeeShift) {
+      if (isCW) {
+        // For Chatwoot chats: find agent name from cwAgents using chatwootAgentId
+        const cwId = (activeEmployeeShift.chatwootAgentId || "").toLowerCase().trim();
+        const cwAgent = cwAgents.find(a =>
+          (a.email || "").toLowerCase().trim() === cwId ||
+          (a.name || "").toLowerCase().trim() === cwId
+        );
+        modalFilteredAgentName = cwAgent?.name || null;
+      } else {
+        modalFilteredAgentName = getAgentForShift(activeEmployeeShift)?.name || null;
+      }
+    }
     const modalPR = modalFilteredAgentName ? getPerAgentReview(r, modalFilteredAgentName) : null;
 
     function renderPerAgentCard(pr) {
@@ -1048,7 +1060,7 @@ async function openModal(chatId, threadId) {
 
     // Filter messages to agent's segment when employee filter is active
     const visibleMessages = modalFilteredAgentName
-      ? (chat.messages || []).filter(m => m.is_private || !m.segment_agent || m.segment_agent.name === modalFilteredAgentName)
+      ? (chat.messages || []).filter(m => m.is_private || !m.segment_agent || m.segment_agent.name?.toLowerCase() === modalFilteredAgentName.toLowerCase())
       : (chat.messages || []);
 
     const messages = visibleMessages.map(m => {
