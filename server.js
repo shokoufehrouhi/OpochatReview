@@ -912,26 +912,29 @@ function getTehranHourFromIso(iso) {
   catch { return -1; }
 }
 
-function detectDeviceFromLC(customerUser, thread, chat) {
-  const ua = customerUser?.visit?.user_agent || "";
-  if (ua) {
-    if (/mobile|android|iphone|ipad/i.test(ua)) return "mobile";
-    return "desktop";
+// Known LiveChat client IDs (identified from usage patterns)
+const LC_CLIENT_DESKTOP = "c85439c4e0c1927e69c317d300c610aa"; // LiveChat web app
+const LC_CLIENT_MOBILE  = "bb9e5b2f1ab480e4a715977b7b1b4279"; // LiveChat mobile app
+
+function detectAgentDeviceFromLC(events, users) {
+  // Find the dominant client_id used by agents in this chat
+  const counts = {};
+  for (const e of events) {
+    if (e.type !== "message") continue;
+    const author = users.find(u => u.id === e.author_id);
+    if (author?.type !== "agent") continue;
+    const cid = e.properties?.source?.client_id;
+    if (cid) counts[cid] = (counts[cid] || 0) + 1;
   }
-  // No visit = came via non-web integration (Telegram, API, etc.)
-  const stats = customerUser?.statistics || {};
-  if (!customerUser?.visit && stats.visits_count === 0 && stats.page_views_count === 0) return "telegram";
+  if (!Object.keys(counts).length) return null;
+  const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  if (dominant === LC_CLIENT_MOBILE) return "mobile";
+  if (dominant === LC_CLIENT_DESKTOP) return "desktop";
   return null;
 }
 
 function detectDeviceFromCW(conv) {
-  const browser = conv.additional_attributes?.browser || {};
-  const deviceName = String(browser.device_name || "").toLowerCase();
-  const platformName = String(browser.platform_name || "").toLowerCase();
-  if (/android|iphone|ipad|mobile/i.test(deviceName) || /android|ios/i.test(platformName)) return "mobile";
-  if (deviceName || platformName) return "desktop";
-  const channel = String(conv.meta?.channel || conv.channel || "").toLowerCase();
-  if (channel.includes("mobile")) return "mobile";
+  // Chatwoot API doesn't expose agent session device — return null
   return null;
 }
 
@@ -1358,7 +1361,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
         ended_at: thread.ended_at || null,
         applied_tags: thread.tags || [],
         review: reviews[thread.id] || reviews[c.id] || null,
-        device: detectDeviceFromLC(customerUser, thread, c),
+        device: detectAgentDeviceFromLC(events, users),
       };
     });
 

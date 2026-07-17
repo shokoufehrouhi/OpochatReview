@@ -708,12 +708,10 @@ function renderTable() {
       : `<span class="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-semibold">LC</span>`;
 
     const deviceIcon = chat.device === "mobile"
-      ? `<span title="Mobile" class="text-base leading-none">📱</span>`
+      ? `<span title="Agent on mobile" class="text-base leading-none">📱</span>`
       : chat.device === "desktop"
-        ? `<span title="Desktop" class="text-base leading-none">💻</span>`
-        : chat.device === "telegram"
-          ? `<span title="Telegram" class="text-xs bg-sky-100 text-sky-600 px-1.5 py-0.5 rounded font-semibold">TG</span>`
-          : `<span class="text-gray-200 text-xs">—</span>`;
+        ? `<span title="Agent on desktop" class="text-base leading-none">💻</span>`
+        : `<span class="text-gray-200 text-xs">—</span>`;
 
     const rowKey = chat.thread_id || chat.id;
     return `<tr class="chat-row border-b border-gray-50" id="row-${rowKey}" onclick="openModal('${chat.id}','${chat.thread_id||""}')">
