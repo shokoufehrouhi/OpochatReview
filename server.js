@@ -914,9 +914,14 @@ function getTehranHourFromIso(iso) {
 
 function detectDeviceFromLC(customerUser, thread, chat) {
   const ua = customerUser?.visit?.user_agent || "";
-  if (!ua) return null;
-  if (/mobile|android|iphone|ipad/i.test(ua)) return "mobile";
-  return "desktop";
+  if (ua) {
+    if (/mobile|android|iphone|ipad/i.test(ua)) return "mobile";
+    return "desktop";
+  }
+  // No visit = came via non-web integration (Telegram, API, etc.)
+  const stats = customerUser?.statistics || {};
+  if (!customerUser?.visit && stats.visits_count === 0 && stats.page_views_count === 0) return "telegram";
+  return null;
 }
 
 function detectDeviceFromCW(conv) {
