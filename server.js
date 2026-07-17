@@ -912,6 +912,36 @@ function getTehranHourFromIso(iso) {
   catch { return -1; }
 }
 
+function detectDeviceFromLC(customerUser, thread) {
+  const sessionFields = customerUser?.session_fields || [];
+  for (const f of sessionFields) {
+    const val = String(f.value || "").toLowerCase();
+    if (/mobile|android|iphone|ipad|phone/i.test(val)) return "mobile";
+    if (/desktop|laptop|windows|macos|mac os/i.test(val)) return "desktop";
+  }
+  const customVars = customerUser?.statistics?.last_visit?.customVariables || [];
+  for (const cv of customVars) {
+    const val = String(cv.value || "").toLowerCase();
+    if (/mobile|android|iphone|ipad|phone/i.test(val)) return "mobile";
+    if (/desktop|laptop|windows|macos/i.test(val)) return "desktop";
+  }
+  const srcType = thread?.properties?.source?.type;
+  if (srcType === "mobile_app") return "mobile";
+  if (srcType === "web_browser") return "desktop";
+  return null;
+}
+
+function detectDeviceFromCW(conv) {
+  const browser = conv.additional_attributes?.browser || {};
+  const deviceName = String(browser.device_name || "").toLowerCase();
+  const platformName = String(browser.platform_name || "").toLowerCase();
+  if (/android|iphone|ipad|mobile/i.test(deviceName) || /android|ios/i.test(platformName)) return "mobile";
+  if (deviceName || platformName) return "desktop";
+  const channel = String(conv.meta?.channel || conv.channel || "").toLowerCase();
+  if (channel.includes("mobile")) return "mobile";
+  return null;
+}
+
 function allAgentsInThread(events, users, shifts, chatStartedAt) {
   const seen = {};
   for (const e of events) {
@@ -1335,6 +1365,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
         ended_at: thread.ended_at || null,
         applied_tags: thread.tags || [],
         review: reviews[thread.id] || reviews[c.id] || null,
+        device: detectDeviceFromLC(customerUser, thread),
       };
     });
 
@@ -1498,6 +1529,7 @@ app.get("/api/chatwoot-chats", authMiddleware, async (req, res) => {
         ended_at: cwTimestamp(conv.resolved_at),
         applied_tags: conv.labels || [],
         review: reviews[cwKey] || null,
+        device: detectDeviceFromCW(conv),
       };
     });
 
