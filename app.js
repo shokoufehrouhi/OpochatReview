@@ -1331,12 +1331,12 @@ function updateChart() {
       scales: {
         y: {
           min: 0, max: 10,
-          grid: { color: "rgba(255,255,255,0.08)" },
-          ticks: { color: "#ffffff" },
+          grid: { color: "rgba(255,255,255,0.1)" },
+          ticks: { color: "#ffffff", font: { size: 12 } },
         },
         x: {
           grid: { display: false },
-          ticks: { color: "#ffffff" },
+          ticks: { color: "#ffffff", font: { size: 12 }, maxRotation: 35, minRotation: 35 },
         },
       },
       plugins: {
